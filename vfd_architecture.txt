@@ -1,0 +1,21 @@
+Scn6Studio/
+│
+├── nodes/
+│   └── vfd_node.py              # Blender node/UI
+│
+├── vfd/
+│   ├── vfd_manager.py           # Universal VFD API
+│   ├── vfd_driver.py             # Base driver interface
+│   │
+│   ├── huanyang_vfd.py          # HY protocol
+│   ├── huanyang_profile.py      # HY01D523B register/config map
+│   │
+│   ├── modbus_vfd.py             # Generic Modbus driver
+│   └── modbus_transport.py       # RS485/Modbus transport
+│
+├── communication/
+│   ├── serial_transport.py
+│   └── tcp_transport.py
+│
+└── api/
+    └── vfd_api.py                # Universal API/schema
