@@ -94,10 +94,10 @@ class VFDStatusSocket(NodeSocket):
 # VFD NODE
 # ============================================================================
 
-class SCN6VFDNode(Node):
+class VFDNode(Node):
 
-    bl_idname = "SCN6VFDNode"
-    bl_label = "SCN6 VFD"
+    bl_idname = "VFDNode"
+    bl_label = "VFD"
     bl_icon = "DRIVER"
 
     # ------------------------------------------------------------------------
