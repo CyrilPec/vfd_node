@@ -141,6 +141,28 @@ class VFDNode(Node):
     )
 
     # ------------------------------------------------------------------------
+    # SERIAL
+    # ------------------------------------------------------------------------
+    serial_port: StringProperty(
+        name="Serial Port",
+        description="RS-485 serial port",
+        default="COM3",
+    )
+
+    baudrate: IntProperty(
+        name="Baud Rate",
+        description="RS-485 baud rate",
+        default=9600,
+        min=1200,
+        max=115200,
+    )
+
+    driver_model: StringProperty(
+        name="Driver",
+        default="HY01D523B",
+    )
+    
+    # ------------------------------------------------------------------------
     # MOTOR
     # ------------------------------------------------------------------------
 

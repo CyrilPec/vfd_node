@@ -1,4 +1,6 @@
-Scn6Studio/
+PD181 program/version information for your HY01D523B
+
+VFD_node/
 │
 ├── nodes/
 │   └── vfd_node.py              # Blender node/UI
