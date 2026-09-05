@@ -10,6 +10,11 @@ from bpy.props import (
     IntProperty,
     StringProperty,
 )
+try:
+    from .huanyang_vfd import HuanyangVFD, HuanyangConfig, PySerialTransport
+except ImportError:
+    from huanyang_vfd import HuanyangVFD, HuanyangConfig, PySerialTransport
+_VFD_DRIVERS = {}
 
 
 # ============================================================================
@@ -28,6 +33,7 @@ from bpy.props import (
 # Value:
 #     actual VFD driver object
 #
+# don't add empty lines to code and make it more as human language text format, but readeble. it will make code smaller as i have big monitor and want less scroll.
 # ============================================================================
 
 _RUNTIME_DRIVERS = {}
@@ -72,6 +78,37 @@ def get_vfd_driver(node):
 
     return _RUNTIME_DRIVERS.get(id(node))
 
+def get_vfd_driver(node):
+    driver = _VFD_DRIVERS.get(id(node))
+    if driver is not None:
+        return driver
+    transport = PySerialTransport(
+        port=node.serial_port,
+        baudrate=node.baudrate,
+        timeout=0.2,
+    )
+    config = HuanyangConfig(
+        slave_id=node.slave_id,
+        baudrate=node.baudrate,
+        timeout=0.2,
+        bytesize=8,
+        parity="N",
+        stopbits=1,
+    )
+    driver = HuanyangVFD(
+        transport=transport,
+        config=config,
+    )
+    _VFD_DRIVERS[id(node)] = driver
+    node.driver_name = driver.name
+    return driver
+def release_vfd_driver(node):
+    driver = _VFD_DRIVERS.pop(id(node), None)
+    if driver is not None:
+        try:
+            driver.disconnect()
+        except Exception:
+            pass
 
 # ============================================================================
 # VFD CONSOLE OPERATOR
@@ -85,33 +122,27 @@ class VFD_OT_console_execute(bpy.types.Operator):
 
     node_name: StringProperty()
 
-    def execute(self, context):
-
+       def execute(self, context):
         node = None
-
-        # ---------------------------------------------------------------------
-        # Find the node.
-        #
-        # Node names are only unique inside a node tree, so we search all
-        # node groups.
-        # ---------------------------------------------------------------------
-
         for node_group in bpy.data.node_groups:
-
             candidate = node_group.nodes.get(self.node_name)
-
             if candidate is not None:
                 node = candidate
                 break
-
         if node is None:
-
-            self.report(
-                {"ERROR"},
-                "VFD node not found",
-            )
-
+            self.report({"ERROR"}, "VFD node not found")
             return {"CANCELLED"}
+        command = node.console_command.strip()
+        if not command:
+            node.console_output = "ERROR: Empty command."
+            return {"CANCELLED"}
+        try:
+            node.console_output = node.execute_console_command(command)
+            return {"FINISHED"}
+        except Exception as exc:
+            node.console_output = f"ERROR: {type(exc).__name__}: {exc}"
+            return {"CANCELLED"}
+
 
         # ---------------------------------------------------------------------
         # Execute through the node.
@@ -712,46 +743,109 @@ class VFDNode(Node):
     # CONSOLE
     # =========================================================================
 
-    def execute_console_command(
-        self,
-        command,
-    ):
-        """
-        Execute one VFD console command.
-
-        Supported commands:
-
-            get PD142
-            set PD142 10
-
-            status
-
-            start
-            stop
-
-            freq 100
-
-        The actual driver is intentionally accessed through get_driver().
-        No Modbus implementation lives here.
-        """
-
-        command = str(
-            command
-        ).strip()
-
-        if not command:
-
-            return "ERROR: Empty command."
-
-        parts = command.split()
-
+       def execute_console_command(self, command):
+        parts = command.strip().split()
         if not parts:
-
             return "ERROR: Empty command."
-
         operation = parts[0].lower()
+        if operation == "get":
+            if len(parts) != 2:
+                return "ERROR: Use: get PDxxx"
+            parameter = parts[1].upper()
+            if not self._valid_parameter(parameter):
+                return "ERROR: Parameter must be PD000-PD999."
+            driver = self.get_driver()
+            if driver is None:
+                return "ERROR: VFD driver unavailable."
+            value = driver.get_parameter(int(parameter[2:]))
+            if value is None:
+                return f"ERROR: Cannot read {parameter}: {driver.last_error}"
+            return f"{parameter} = {value}"
+        if operation == "set":
+            if len(parts) != 3:
+                return "ERROR: Use: set PDxxx VALUE"
+            parameter = parts[1].upper()
+            if not self._valid_parameter(parameter):
+                return "ERROR: Parameter must be PD000-PD999."
+            try:
+                value = int(float(parts[2]))
+            except ValueError:
+                return f"ERROR: Invalid value: {parts[2]}"
+            if not self.armed:
+                return "ERROR: VFD is not ARMED."
+            driver = self.get_driver()
+            if driver is None:
+                return "ERROR: VFD driver unavailable."
+            if driver.set_parameter(int(parameter[2:]), value):
+                return f"OK: {parameter} = {value}"
+            return f"ERROR: Cannot write {parameter}: {driver.last_error}"
+        if operation == "status":
+            driver = self.get_driver()
+            if driver is None:
+                return "ERROR: VFD driver unavailable."
+            status = driver.get_status()
+            if status is None:
+                return f"ERROR: {driver.last_error}"
+            self.connected = bool(status.connected)
+            self.running = bool(status.running)
+            self.actual_frequency = float(status.frequency_hz)
+            self.actual_rpm = float(status.rpm)
+            self.actual_current = float(status.current_a)
+            self.actual_voltage = float(status.voltage_v)
+            self.status_text = str(status.state)
+            return (
+                f"Connected: {status.connected}\n"
+                f"Running: {status.running}\n"
+                f"Frequency: {status.frequency_hz:.2f} Hz\n"
+                f"RPM: {status.rpm:.0f}\n"
+                f"Current: {status.current_a:.2f} A\n"
+                f"Voltage: {status.voltage_v:.1f} V"
+            )
+        if operation == "start":
+            if not self.armed:
+                return "ERROR: VFD is not ARMED."
+            driver = self.get_driver()
+            if driver is None:
+                return "ERROR: VFD driver unavailable."
+            if driver.start():
+                self.running = True
+                return "OK: START"
+            return f"ERROR: START failed: {driver.last_error}"
+        if operation == "stop":
+            driver = self.get_driver()
+            if driver is None:
+                return "ERROR: VFD driver unavailable."
+            if driver.stop():
+                self.running = False
+                return "OK: STOP"
+            return f"ERROR: STOP failed: {driver.last_error}"
+        if operation in ("freq", "frequency"):
+            if len(parts) != 2:
+                return "ERROR: Use: freq VALUE"
+            try:
+                frequency = float(parts[1])
+            except ValueError:
+                return f"ERROR: Invalid frequency: {parts[1]}"
+            if not self.armed:
+                return "ERROR: VFD is not ARMED."
+            driver = self.get_driver()
+            if driver is None:
+                return "ERROR: VFD driver unavailable."
+            if driver.set_frequency(frequency):
+                self.frequency_command = frequency
+                return f"OK: FREQUENCY {frequency:g} Hz"
+            return f"ERROR: FREQUENCY failed: {driver.last_error}"
+        return f"ERROR: Unknown command: {command}"
+    @staticmethod
+    def _valid_parameter(parameter):
+        return (
+            len(parameter) == 5
+            and parameter[:2] == "PD"
+            and parameter[2:].isdigit()
+        )
+    def get_driver(self):
+        return get_vfd_driver(self)
 
-        driver = self.get_driver()
 
         # ---------------------------------------------------------------------
         # GET PARAMETER
@@ -1407,34 +1501,14 @@ class VFDNode(Node):
         # ---------------------------------------------------------------------
 
         box = layout.box()
-
-        box.label(
-            text="VFD Console",
-            icon="CONSOLE",
-        )
-
-        box.prop(
-            self,
-            "console_command",
-            text="",
-        )
-
+        box.label(text="VFD Console", icon="CONSOLE")
+        box.prop(self, "console_command", text="")
         row = box.row()
-
         row.scale_y = 1.3
-
-        op = row.operator(
-            "vfd.console_execute",
-            text="EXECUTE",
-            icon="PLAY",
-        )
-
+        op = row.operator("vfd.console_execute", text="EXECUTE", icon="PLAY")
         op.node_name = self.name
+        box.label(text=self.console_output, icon="INFO")
 
-        box.label(
-            text="Output",
-            icon="INFO",
-        )
 
         output_box = box.box()
 
