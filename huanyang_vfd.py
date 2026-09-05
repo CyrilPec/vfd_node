@@ -755,6 +755,21 @@ class HuanyangVFD(VFDDriver):
             )
 
             return None
+    def get_parameter(self, parameter: int) -> Optional[int]:
+        """Read a Huanyang PD parameter."""
+        parameter = int(parameter)
+        if parameter < 0 or parameter > 999:
+            self.last_error = f"Invalid parameter: PD{parameter:03d}"
+            return None
+        return self.read_function_data(parameter)
+    def set_parameter(self, parameter: int, value: int) -> bool:
+        """Write a Huanyang PD parameter."""
+        parameter = int(parameter)
+        value = int(value)
+        if parameter < 0 or parameter > 999:
+            self.last_error = f"Invalid parameter: PD{parameter:03d}"
+            return False
+        return self.write_function_data(parameter, value)
 
     # =========================================================================
     # FUNCTION DATA WRITE
