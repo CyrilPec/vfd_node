@@ -324,29 +324,32 @@ class HY01D523B:
         return True
 
     # ------------------------------------------------------------------
-    # READ PARAMETER
+    # PARAMETERS
     # ------------------------------------------------------------------
-
+    MIN_PARAMETER = 0
+    MAX_PARAMETER = 185
+    def _validate_parameter(self, parameter):
+        parameter = int(parameter)
+        if not self.MIN_PARAMETER <= parameter <= self.MAX_PARAMETER:
+            raise ValueError(
+                f"Parameter must be between PD{self.MIN_PARAMETER:03d} "
+                f"and PD{self.MAX_PARAMETER:03d}."
+            )
+        return parameter
     def read_parameter(self, parameter):
         """
-        Read one PD parameter.
-
+        Read one HY01D523B parameter.
         Example:
-            read_parameter(163)
-
-        PD163 = communication address
-        PD164 = baud setting
-        PD165 = communication data method
-        PD181 = software version
+            read_parameter(0)   -> PD000
+            read_parameter(163) -> PD163
+            read_parameter(182) -> PD182
+        Request:
+            address 01 03 parameter_hi parameter_lo 00 00 CRC
+        Response:
+            address 01 02 parameter value_hi value_lo CRC
         """
-
-        parameter = int(parameter)
-
-        if parameter < 0 or parameter > 250:
-            raise ValueError("Parameter must be between 0 and 250.")
-
+        parameter = self._validate_parameter(parameter)
         address = self.slave_id
-
         frame_without_crc = bytes(
             (
                 address,
@@ -358,48 +361,59 @@ class HY01D523B:
                 0x00,
             )
         )
-
-        frame = frame_without_crc + self._crc16_modbus(
-            frame_without_crc
-        )
-
+        frame = frame_without_crc + self._crc16_modbus(frame_without_crc)
         response = self._send(
             frame,
             expect_response=True,
             response_size=8,
         )
-
-        if len(response) < 5:
+        if len(response) < 7:
             raise HY01D523BError(
-                "Invalid parameter response: "
-                + response.hex(" ")
+                f"Invalid response for PD{parameter:03d}: "
+                f"{response.hex(' ')}"
             )
-
-        return response
-
-    # ------------------------------------------------------------------
-    # WRITE PARAMETER
-    # ------------------------------------------------------------------
-
+        if response[0] != address:
+            raise HY01D523BError(
+                f"Wrong VFD address in response: "
+                f"{response[0]:02X}, expected {address:02X}."
+            )
+        if response[1] != 0x01:
+            raise HY01D523BError(
+                f"Unexpected response function: {response[1]:02X}."
+            )
+        if response[2] != 0x02:
+            raise HY01D523BError(
+                f"Unexpected response data length: {response[2]:02X}."
+            )
+        returned_parameter = (response[3] << 8) | response[4]
+        value = (response[5] << 8) | response[6]
+        received_crc = response[7:9]
+        if len(response) >= 9:
+            crc_data = response[:7]
+            expected_crc = self._crc16_modbus(crc_data)
+            if received_crc != expected_crc:
+                raise HY01D523BError(
+                    f"Invalid CRC reading PD{parameter:03d}: "
+                    f"{response.hex(' ')}"
+                )
+        if returned_parameter != parameter:
+            raise HY01D523BError(
+                f"VFD returned PD{returned_parameter:03d}, "
+                f"expected PD{parameter:03d}."
+            )
+        return value
     def write_parameter(self, parameter, value):
         """
-        Write a PD parameter.
-
-        This uses the documented HY01D523B write format:
-
-            address 02 03 parameter_hi parameter_lo
-            value_hi value_lo CRC
+        Write one HY01D523B parameter.
+        Example:
+            write_parameter(163, 4)
+        writes:
+            PD163 = 4
         """
-
-        parameter = int(parameter)
+        parameter = self._validate_parameter(parameter)
         value = int(value)
-
-        if not 0 <= parameter <= 250:
-            raise ValueError("Parameter must be between 0 and 250.")
-
         if not 0 <= value <= 0xFFFF:
-            raise ValueError("Parameter value must be 0..65535.")
-
+            raise ValueError("Parameter value must be between 0 and 65535.")
         frame_without_crc = bytes(
             (
                 self.slave_id,
@@ -411,13 +425,8 @@ class HY01D523B:
                 value & 0xFF,
             )
         )
-
-        frame = frame_without_crc + self._crc16_modbus(
-            frame_without_crc
-        )
-
+        frame = frame_without_crc + self._crc16_modbus(frame_without_crc)
         self._send(frame)
-
         return True
 
     # ------------------------------------------------------------------
