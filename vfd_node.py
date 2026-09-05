@@ -11,6 +11,99 @@ from bpy.props import (
     EnumProperty,
 )
 
+# ============================================================================
+# VFD CONSOLE OPERATOR
+# ============================================================================
+
+class VFD_OT_console_execute(bpy.types.Operator):
+    bl_idname = "vfd.console_execute"
+    bl_label = "Execute VFD Command"
+    bl_description = "Execute the command entered in the VFD Console"
+
+    node_name: StringProperty()
+
+    def execute(self, context):
+        node = None
+
+        # Search all node groups for the requested node.
+        for node_group in bpy.data.node_groups:
+            candidate = node_group.nodes.get(self.node_name)
+
+            if candidate is not None:
+                node = candidate
+                break
+
+        if node is None:
+            self.report(
+                {"ERROR"},
+                "VFD node not found",
+            )
+            return {"CANCELLED"}
+
+        command = node.console_command.strip()
+
+        if not command:
+            node.console_output = "ERROR: Empty command."
+            return {"CANCELLED"}
+
+        # ------------------------------------------------------------------
+        # TEMPORARY CONSOLE BACKEND
+        #
+        # We deliberately do NOT talk to Modbus here yet.
+        # This lets us test the Blender UI first.
+        # ------------------------------------------------------------------
+
+        if command.lower().startswith("get "):
+            parameter = command[4:].strip().upper()
+
+            node.console_output = (
+                f"READ REQUEST: {parameter}"
+            )
+
+        elif command.lower().startswith("set "):
+            parts = command.split()
+
+            if len(parts) != 3:
+                node.console_output = (
+                    "ERROR: Use: set PDxxx VALUE"
+                )
+                return {"CANCELLED"}
+
+            parameter = parts[1].upper()
+            value = parts[2]
+
+            node.console_output = (
+                f"WRITE REQUEST: {parameter} = {value}"
+            )
+
+        elif command.lower() == "status":
+            node.console_output = (
+                f"Status: {node.status_text}"
+            )
+
+        elif command.lower() == "start":
+            node.console_output = (
+                "START REQUEST"
+            )
+
+        elif command.lower() == "stop":
+            node.console_output = (
+                "STOP REQUEST"
+            )
+
+        elif command.lower().startswith("freq "):
+            value = command[5:].strip()
+
+            node.console_output = (
+                f"FREQUENCY REQUEST: {value} Hz"
+            )
+
+        else:
+            node.console_output = (
+                f"UNKNOWN COMMAND: {command}"
+            )
+
+        return {"FINISHED"}
 
 # ============================================================================
 # VFD SOCKET
@@ -312,6 +405,22 @@ class VFDNode(Node):
     status_text: StringProperty(
         name="Status",
         default="Disconnected",
+    )
+    
+    # ------------------------------------------------------------------------
+    # VFD CONSOLE
+    # ------------------------------------------------------------------------
+
+    console_command: StringProperty(
+        name="Command",
+        description="VFD console command",
+        default="get PD142",
+    )
+
+    console_output: StringProperty(
+        name="Output",
+        description="Last VFD console result",
+        default="Ready.",
     )
 
     # =========================================================================
@@ -708,6 +817,47 @@ class VFDNode(Node):
             "reset_command",
             text="RESET",
         )
+        
+        # ---------------------------------------------------------------------
+        # VFD CONSOLE
+        # ---------------------------------------------------------------------
+
+        box = layout.box()
+
+        box.label(
+            text="VFD Console",
+            icon="CONSOLE",
+        )
+
+        box.prop(
+            self,
+            "console_command",
+            text="",
+        )
+
+        row = box.row()
+        row.scale_y = 1.3
+
+        op = row.operator(
+            "vfd.console_execute",
+            text="EXECUTE",
+            icon="PLAY",
+        )
+
+        op.node_name = self.name
+
+        box.label(
+            text="Output",
+            icon="INFO",
+        )
+
+        output_box = box.box()
+
+        # Blender StringProperty is single-line.
+        # Display the result in a readable way.
+        output_box.label(
+            text=self.console_output,
+        )
 
         # ---------------------------------------------------------------------
         # SAFETY
@@ -800,3 +950,9 @@ class VFDNode(Node):
             f"VFD "
             f"{self.device_name}"
         )
+classes = (
+    VFDValueSocket,
+    VFDStatusSocket,
+    VFD_OT_console_execute,
+    VFDNode,
+)
