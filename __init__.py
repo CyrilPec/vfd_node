@@ -1,44 +1,16 @@
 bl_info = {
     "name": "VFD Node",
     "author": "CyrilPec",
-    "version": (1, 0, 1),
-    "blender": (3, 6, 0),
-    "location": "Node Editor",
-    "description": "VFD control node",
+    "version": (1, 0, 0),
+    "blender": (3, 0, 0),
+    "location": "Node Editor > Add > VFD",
+    "description": "HY01D523B VFD control node",
     "category": "Node",
 }
-
-import bpy
-
-from .vfd_node import (
-    VFDValueSocket,
-    VFDStatusSocket,
-    VFD_OT_execute,
-    VFD_OT_connect,
-    VFD_OT_disconnect,
-    VFDNode,
-)
-
-
-classes = (
-    VFDValueSocket,
-    VFDStatusSocket,
-    VFD_OT_execute,
-    VFD_OT_connect,
-    VFD_OT_disconnect,
-    VFDNode,
-)
-
-
+from . import vfd_node
 def register():
-    for cls in classes:
-        bpy.utils.register_class(cls)
-
-
+    vfd_node.register()
 def unregister():
-    for cls in reversed(classes):
-        bpy.utils.unregister_class(cls)
-
-
+    vfd_node.unregister()
 if __name__ == "__main__":
     register()
