@@ -299,6 +299,44 @@ class VFDNode(Node):
         if operation == "status":
             self.update_status()
             return f"Connected: {self.connected}\nRunning: {self.running}\nFrequency: {self.actual_frequency:.2f} Hz\nRPM: {self.actual_rpm:.0f}\nCurrent: {self.actual_current:.2f} A\nVoltage: {self.actual_voltage:.1f} V\nPower: {self.actual_power:.2f} kW\nFault: {self.fault}\nFault code: {self.fault_code}"
+        if operation in {"get", "read"}:
+        if len(parts) != 2:
+            return "ERROR: Use: get PD163"
+        parameter_text = parts[1].upper()
+        if parameter_text.startswith("PD"):
+            parameter_text = parameter_text[2:]
+        try:
+            parameter = int(parameter_text)
+        except ValueError:
+            return "ERROR: Invalid parameter. Use PD000-PD182."
+        if parameter < 0 or parameter > 182:
+            return "ERROR: Parameter must be PD000-PD182."
+        if not manager.is_connected():
+            return "ERROR: VFD is disconnected."
+        value = manager.read_parameter(parameter)
+        if value is None:
+            return f"ERROR: {manager.status.fault_text}"
+        return f"OK: PD{parameter:03d} = {value}"
+        if operation in {"set", "write"}:
+        if len(parts) != 3:
+            return "ERROR: Use: set PD163 4"
+            parameter_text = parts[1].upper()
+        if parameter_text.startswith("PD"):
+            parameter_text = parameter_text[2:]
+        try:
+            parameter = int(parameter_text)
+            value = int(parts[2])
+        except ValueError:
+            return "ERROR: Invalid parameter or value."
+        if parameter < 0 or parameter > 182:
+            return "ERROR: Parameter must be PD000-PD182."
+        if value < 0 or value > 65535:
+            return "ERROR: Value must be 0-65535."
+        if not manager.is_connected():
+            return "ERROR: VFD is disconnected."
+        if not manager.write_parameter(parameter, value):
+            return f"ERROR: {manager.status.fault_text}"
+            return f"OK: PD{parameter:03d} = {value}"
         if operation in {"start", "run"}:
             if not self.enabled or not self.armed:
                 return "ERROR: VFD is not enabled and armed."
