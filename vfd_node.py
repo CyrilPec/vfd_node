@@ -1,19 +1,82 @@
 from __future__ import annotations
 
-import bpy
+import re
 
+import bpy
 from bpy.types import Node, NodeSocket
 from bpy.props import (
     BoolProperty,
     FloatProperty,
     IntProperty,
     StringProperty,
-    EnumProperty,
 )
+
+
+# ============================================================================
+# RUNTIME DRIVER REGISTRY
+# ============================================================================
+#
+# Blender Node properties cannot store arbitrary Python objects.
+#
+# The actual VFD driver will therefore be attached at runtime.
+#
+# The next step will create/attach the ModbusVFD object here.
+#
+# Key:
+#     id(node)
+#
+# Value:
+#     actual VFD driver object
+#
+# ============================================================================
+
+_RUNTIME_DRIVERS = {}
+
+
+def attach_vfd_driver(node, driver):
+    """
+    Attach a runtime VFD driver to a Blender node.
+
+    The driver is NOT stored inside the .blend file.
+    It exists only while Blender is running.
+    """
+
+    if node is None:
+        return
+
+    if driver is None:
+        _RUNTIME_DRIVERS.pop(id(node), None)
+        return
+
+    _RUNTIME_DRIVERS[id(node)] = driver
+
+
+def detach_vfd_driver(node):
+    """
+    Remove the runtime VFD driver from a node.
+    """
+
+    if node is None:
+        return
+
+    _RUNTIME_DRIVERS.pop(id(node), None)
+
+
+def get_vfd_driver(node):
+    """
+    Return the runtime driver assigned to a node.
+    """
+
+    if node is None:
+        return None
+
+    return _RUNTIME_DRIVERS.get(id(node))
+
 
 # ============================================================================
 # VFD CONSOLE OPERATOR
 # ============================================================================
+
 
 class VFD_OT_console_execute(bpy.types.Operator):
     bl_idname = "vfd.console_execute"
@@ -23,10 +86,18 @@ class VFD_OT_console_execute(bpy.types.Operator):
     node_name: StringProperty()
 
     def execute(self, context):
+
         node = None
 
-        # Search all node groups for the requested node.
+        # ---------------------------------------------------------------------
+        # Find the node.
+        #
+        # Node names are only unique inside a node tree, so we search all
+        # node groups.
+        # ---------------------------------------------------------------------
+
         for node_group in bpy.data.node_groups:
+
             candidate = node_group.nodes.get(self.node_name)
 
             if candidate is not None:
@@ -34,82 +105,50 @@ class VFD_OT_console_execute(bpy.types.Operator):
                 break
 
         if node is None:
+
             self.report(
                 {"ERROR"},
                 "VFD node not found",
             )
+
             return {"CANCELLED"}
+
+        # ---------------------------------------------------------------------
+        # Execute through the node.
+        # ---------------------------------------------------------------------
 
         command = node.console_command.strip()
 
         if not command:
+
             node.console_output = "ERROR: Empty command."
+
             return {"CANCELLED"}
 
-        # ------------------------------------------------------------------
-        # TEMPORARY CONSOLE BACKEND
-        #
-        # We deliberately do NOT talk to Modbus here yet.
-        # This lets us test the Blender UI first.
-        # ------------------------------------------------------------------
+        try:
 
-        if command.lower().startswith("get "):
-            parameter = command[4:].strip().upper()
+            result = node.execute_console_command(command)
 
-            node.console_output = (
-                f"READ REQUEST: {parameter}"
-            )
+            node.console_output = str(result)
 
-        elif command.lower().startswith("set "):
-            parts = command.split()
+            return {"FINISHED"}
 
-            if len(parts) != 3:
-                node.console_output = (
-                    "ERROR: Use: set PDxxx VALUE"
-                )
-                return {"CANCELLED"}
-
-            parameter = parts[1].upper()
-            value = parts[2]
+        except Exception as exc:
 
             node.console_output = (
-                f"WRITE REQUEST: {parameter} = {value}"
+                f"ERROR: {type(exc).__name__}: {exc}"
             )
 
-        elif command.lower() == "status":
-            node.console_output = (
-                f"Status: {node.status_text}"
-            )
+            return {"CANCELLED"}
 
-        elif command.lower() == "start":
-            node.console_output = (
-                "START REQUEST"
-            )
-
-        elif command.lower() == "stop":
-            node.console_output = (
-                "STOP REQUEST"
-            )
-
-        elif command.lower().startswith("freq "):
-            value = command[5:].strip()
-
-            node.console_output = (
-                f"FREQUENCY REQUEST: {value} Hz"
-            )
-
-        else:
-            node.console_output = (
-                f"UNKNOWN COMMAND: {command}"
-            )
-
-        return {"FINISHED"}
 
 # ============================================================================
-# VFD SOCKET
+# VFD VALUE SOCKET
 # ============================================================================
+
 
 class VFDValueSocket(NodeSocket):
+
     bl_idname = "VFDValueSocket"
     bl_label = "VFD Value"
 
@@ -120,7 +159,9 @@ class VFDValueSocket(NodeSocket):
         node,
         text,
     ):
-        layout.label(text=text)
+        layout.label(
+            text=text,
+        )
 
     def draw_color(
         self,
@@ -148,7 +189,9 @@ class VFDValueSocket(NodeSocket):
 # VFD STATUS SOCKET
 # ============================================================================
 
+
 class VFDStatusSocket(NodeSocket):
+
     bl_idname = "VFDStatusSocket"
     bl_label = "VFD Status"
 
@@ -159,7 +202,9 @@ class VFDStatusSocket(NodeSocket):
         node,
         text,
     ):
-        layout.label(text=text)
+        layout.label(
+            text=text,
+        )
 
     def draw_color(
         self,
@@ -186,6 +231,7 @@ class VFDStatusSocket(NodeSocket):
 # ============================================================================
 # VFD NODE
 # ============================================================================
+
 
 class VFDNode(Node):
 
@@ -236,6 +282,7 @@ class VFDNode(Node):
     # ------------------------------------------------------------------------
     # SERIAL
     # ------------------------------------------------------------------------
+
     serial_port: StringProperty(
         name="Serial Port",
         description="RS-485 serial port",
@@ -254,7 +301,7 @@ class VFDNode(Node):
         name="Driver",
         default="HY01D523B",
     )
-    
+
     # ------------------------------------------------------------------------
     # MOTOR
     # ------------------------------------------------------------------------
@@ -406,7 +453,7 @@ class VFDNode(Node):
         name="Status",
         default="Disconnected",
     )
-    
+
     # ------------------------------------------------------------------------
     # VFD CONSOLE
     # ------------------------------------------------------------------------
@@ -511,6 +558,17 @@ class VFDNode(Node):
         )
 
     # =========================================================================
+    # RUNTIME DRIVER
+    # =========================================================================
+
+    def get_driver(self):
+        """
+        Return the runtime VFD driver assigned to this node.
+        """
+
+        return get_vfd_driver(self)
+
+    # =========================================================================
     # FREQUENCY / RPM CONVERSION
     # =========================================================================
 
@@ -518,6 +576,7 @@ class VFDNode(Node):
         self,
         frequency,
     ):
+
         if self.motor_frequency <= 0.0:
             return 0.0
 
@@ -531,6 +590,7 @@ class VFDNode(Node):
         self,
         rpm,
     ):
+
         if self.motor_rpm <= 0.0:
             return 0.0
 
@@ -576,12 +636,15 @@ class VFDNode(Node):
         frequency = self.frequency_command
 
         # RPM input has priority when connected.
+
         rpm_socket = self.inputs.get("RPM")
 
         if rpm_socket is not None:
+
             if rpm_socket.is_linked:
 
                 try:
+
                     rpm = float(
                         rpm_socket.default_value
                     )
@@ -598,14 +661,29 @@ class VFDNode(Node):
         )
 
         return {
-            "enabled": bool(self.enabled),
-            "armed": bool(self.armed),
+            "enabled": bool(
+                self.enabled
+            ),
 
-            "run": bool(self.running_command),
-            "reverse": bool(self.reverse_command),
-            "reset": bool(self.reset_command),
+            "armed": bool(
+                self.armed
+            ),
 
-            "frequency": float(frequency),
+            "run": bool(
+                self.running_command
+            ),
+
+            "reverse": bool(
+                self.reverse_command
+            ),
+
+            "reset": bool(
+                self.reset_command
+            ),
+
+            "frequency": float(
+                frequency
+            ),
 
             "rpm": float(
                 self.frequency_to_rpm(
@@ -615,39 +693,533 @@ class VFDNode(Node):
         }
 
     # =========================================================================
-    # DRIVER API PLACEHOLDER
+    # DRIVER API
     # =========================================================================
 
     def driver_update(
         self,
         driver,
     ):
-        """
-        Universal VFD interface.
-
-        The node does NOT know anything about Modbus.
-
-        A future driver receives this logical command and
-        translates it into the protocol required by the VFD.
-        """
 
         if driver is None:
-            return
+            return None
 
         command = self.get_command()
 
-        # Future API:
-        #
-        # driver.set_enabled(command["enabled"])
-        # driver.set_armed(command["armed"])
-        # driver.set_run(command["run"])
-        # driver.set_reverse(command["reverse"])
-        # driver.set_frequency(command["frequency"])
-        # driver.reset_fault()
-        #
-        # status = driver.get_status()
-
         return command
+
+    # =========================================================================
+    # CONSOLE
+    # =========================================================================
+
+    def execute_console_command(
+        self,
+        command,
+    ):
+        """
+        Execute one VFD console command.
+
+        Supported commands:
+
+            get PD142
+            set PD142 10
+
+            status
+
+            start
+            stop
+
+            freq 100
+
+        The actual driver is intentionally accessed through get_driver().
+        No Modbus implementation lives here.
+        """
+
+        command = str(
+            command
+        ).strip()
+
+        if not command:
+
+            return "ERROR: Empty command."
+
+        parts = command.split()
+
+        if not parts:
+
+            return "ERROR: Empty command."
+
+        operation = parts[0].lower()
+
+        driver = self.get_driver()
+
+        # ---------------------------------------------------------------------
+        # GET PARAMETER
+        # ---------------------------------------------------------------------
+
+        if operation == "get":
+
+            if len(parts) != 2:
+
+                return (
+                    "ERROR: Use: get PDxxx"
+                )
+
+            parameter = parts[1].upper()
+
+            if not self._valid_parameter_name(
+                parameter
+            ):
+
+                return (
+                    "ERROR: Invalid parameter. "
+                    "Use PD000-PD999."
+                )
+
+            if driver is None:
+
+                return (
+                    "ERROR: No VFD driver attached."
+                )
+
+            return self._driver_get_parameter(
+                driver,
+                parameter,
+            )
+
+        # ---------------------------------------------------------------------
+        # SET PARAMETER
+        # ---------------------------------------------------------------------
+
+        if operation == "set":
+
+            if len(parts) != 3:
+
+                return (
+                    "ERROR: Use: set PDxxx VALUE"
+                )
+
+            parameter = parts[1].upper()
+            value_text = parts[2]
+
+            if not self._valid_parameter_name(
+                parameter
+            ):
+
+                return (
+                    "ERROR: Invalid parameter. "
+                    "Use PD000-PD999."
+                )
+
+            try:
+
+                value = float(
+                    value_text
+                )
+
+            except ValueError:
+
+                return (
+                    f"ERROR: Invalid value: "
+                    f"{value_text}"
+                )
+
+            if driver is None:
+
+                return (
+                    "ERROR: No VFD driver attached."
+                )
+
+            # ---------------------------------------------------------------
+            # Writes require ARM.
+            # ---------------------------------------------------------------
+
+            if not self.enabled:
+
+                return (
+                    "ERROR: VFD node is disabled."
+                )
+
+            if not self.armed:
+
+                return (
+                    "ERROR: VFD is not ARMED."
+                )
+
+            return self._driver_set_parameter(
+                driver,
+                parameter,
+                value,
+            )
+
+        # ---------------------------------------------------------------------
+        # STATUS
+        # ---------------------------------------------------------------------
+
+        if operation == "status":
+
+            return self._console_status()
+
+        # ---------------------------------------------------------------------
+        # START
+        # ---------------------------------------------------------------------
+
+        if operation == "start":
+
+            if driver is None:
+
+                return (
+                    "ERROR: No VFD driver attached."
+                )
+
+            if not self.enabled:
+
+                return (
+                    "ERROR: VFD node is disabled."
+                )
+
+            if not self.armed:
+
+                return (
+                    "ERROR: VFD is not ARMED."
+                )
+
+            method = getattr(
+                driver,
+                "start",
+                None,
+            )
+
+            if method is None:
+
+                return (
+                    "ERROR: Driver does not support start()."
+                )
+
+            result = method()
+
+            if result:
+
+                self.running = True
+
+                return "OK: START"
+
+            return "ERROR: START failed."
+
+        # ---------------------------------------------------------------------
+        # STOP
+        # ---------------------------------------------------------------------
+
+        if operation == "stop":
+
+            if driver is None:
+
+                return (
+                    "ERROR: No VFD driver attached."
+                )
+
+            method = getattr(
+                driver,
+                "stop",
+                None,
+            )
+
+            if method is None:
+
+                return (
+                    "ERROR: Driver does not support stop()."
+                )
+
+            result = method()
+
+            if result:
+
+                self.running = False
+
+                return "OK: STOP"
+
+            return "ERROR: STOP failed."
+
+        # ---------------------------------------------------------------------
+        # FREQUENCY
+        # ---------------------------------------------------------------------
+
+        if operation in {
+            "freq",
+            "frequency",
+        }:
+
+            if len(parts) != 2:
+
+                return (
+                    "ERROR: Use: freq VALUE"
+                )
+
+            try:
+
+                frequency = float(
+                    parts[1]
+                )
+
+            except ValueError:
+
+                return (
+                    f"ERROR: Invalid frequency: "
+                    f"{parts[1]}"
+                )
+
+            frequency = self.clamp_frequency(
+                frequency
+            )
+
+            if driver is None:
+
+                return (
+                    "ERROR: No VFD driver attached."
+                )
+
+            if not self.enabled:
+
+                return (
+                    "ERROR: VFD node is disabled."
+                )
+
+            if not self.armed:
+
+                return (
+                    "ERROR: VFD is not ARMED."
+                )
+
+            method = getattr(
+                driver,
+                "set_frequency",
+                None,
+            )
+
+            if method is None:
+
+                return (
+                    "ERROR: Driver does not support "
+                    "set_frequency()."
+                )
+
+            result = method(
+                frequency
+            )
+
+            if result:
+
+                self.frequency_command = (
+                    frequency
+                )
+
+                return (
+                    f"OK: FREQUENCY "
+                    f"{frequency:g} Hz"
+                )
+
+            return (
+                "ERROR: Frequency command failed."
+            )
+
+        # ---------------------------------------------------------------------
+        # UNKNOWN
+        # ---------------------------------------------------------------------
+
+        return (
+            f"ERROR: Unknown command: "
+            f"{command}"
+        )
+
+    # =========================================================================
+    # CONSOLE PARAMETER HELPERS
+    # =========================================================================
+
+    @staticmethod
+    def _valid_parameter_name(
+        parameter,
+    ):
+
+        return bool(
+            re.fullmatch(
+                r"PD\d{3}",
+                str(parameter).upper(),
+            )
+        )
+
+    def _parameter_number(
+        self,
+        parameter,
+    ):
+
+        return int(
+            str(parameter)[2:]
+        )
+
+    def _driver_get_parameter(
+        self,
+        driver,
+        parameter,
+    ):
+        """
+        Get an arbitrary PDxxx parameter.
+
+        The preferred future driver API is:
+
+            driver.get_parameter(number)
+
+        If the driver does not provide that API yet, we return a clear
+        message instead of inventing a register mapping.
+        """
+
+        number = self._parameter_number(
+            parameter
+        )
+
+        method = getattr(
+            driver,
+            "get_parameter",
+            None,
+        )
+
+        if method is None:
+
+            return (
+                "ERROR: Driver does not yet "
+                "implement get_parameter(). "
+                f"Requested {parameter}."
+            )
+
+        try:
+
+            value = method(
+                number
+            )
+
+            return (
+                f"{parameter} = {value}"
+            )
+
+        except Exception as exc:
+
+            return (
+                f"ERROR reading {parameter}: "
+                f"{exc}"
+            )
+
+    def _driver_set_parameter(
+        self,
+        driver,
+        parameter,
+        value,
+    ):
+        """
+        Set an arbitrary PDxxx parameter.
+
+        The preferred driver API is:
+
+            driver.set_parameter(number, value)
+        """
+
+        number = self._parameter_number(
+            parameter
+        )
+
+        method = getattr(
+            driver,
+            "set_parameter",
+            None,
+        )
+
+        if method is None:
+
+            return (
+                "ERROR: Driver does not yet "
+                "implement set_parameter(). "
+                f"Requested {parameter} = {value}."
+            )
+
+        try:
+
+            result = method(
+                number,
+                value,
+            )
+
+            if result:
+
+                return (
+                    f"OK: {parameter} = {value:g}"
+                )
+
+            return (
+                f"ERROR: Failed to set "
+                f"{parameter}."
+            )
+
+        except Exception as exc:
+
+            return (
+                f"ERROR writing {parameter}: "
+                f"{exc}"
+            )
+
+    # =========================================================================
+    # CONSOLE STATUS
+    # =========================================================================
+
+    def _console_status(
+        self,
+    ):
+
+        driver = self.get_driver()
+
+        lines = [
+            f"Device: {self.device_name}",
+            f"Driver: {self.driver_name}",
+            f"Address: {self.slave_id}",
+            f"Connected: {self.connected}",
+            f"Running: {self.running}",
+            f"Fault: {self.fault}",
+        ]
+
+        if driver is None:
+
+            lines.append(
+                "Driver object: NOT ATTACHED"
+            )
+
+            return "\n".join(
+                lines
+            )
+
+        is_connected = getattr(
+            driver,
+            "is_connected",
+            None,
+        )
+
+        if callable(
+            is_connected
+        ):
+
+            try:
+
+                lines.append(
+                    "Driver connected: "
+                    f"{bool(is_connected())}"
+                )
+
+            except Exception as exc:
+
+                lines.append(
+                    "Driver connection check: "
+                    f"ERROR: {exc}"
+                )
+
+        return "\n".join(
+            lines
+        )
 
     # =========================================================================
     # UI
@@ -710,6 +1282,18 @@ class VFDNode(Node):
                 text="DISCONNECTED",
                 icon="ERROR",
             )
+
+        box.prop(
+            self,
+            "serial_port",
+            text="Port",
+        )
+
+        box.prop(
+            self,
+            "baudrate",
+            text="Baud",
+        )
 
         box.prop(
             self,
@@ -817,7 +1401,7 @@ class VFDNode(Node):
             "reset_command",
             text="RESET",
         )
-        
+
         # ---------------------------------------------------------------------
         # VFD CONSOLE
         # ---------------------------------------------------------------------
@@ -836,6 +1420,7 @@ class VFDNode(Node):
         )
 
         row = box.row()
+
         row.scale_y = 1.3
 
         op = row.operator(
@@ -853,10 +1438,38 @@ class VFDNode(Node):
 
         output_box = box.box()
 
-        # Blender StringProperty is single-line.
-        # Display the result in a readable way.
         output_box.label(
             text=self.console_output,
+        )
+
+        # ---------------------------------------------------------------------
+        # CONSOLE HELP
+        # ---------------------------------------------------------------------
+
+        help_box = box.box()
+
+        help_box.label(
+            text="Examples:",
+        )
+
+        help_box.label(
+            text="get PD142",
+        )
+
+        help_box.label(
+            text="set PD142 10",
+        )
+
+        help_box.label(
+            text="status",
+        )
+
+        help_box.label(
+            text="freq 100",
+        )
+
+        help_box.label(
+            text="start / stop",
         )
 
         # ---------------------------------------------------------------------
@@ -879,6 +1492,7 @@ class VFDNode(Node):
         row = box.row()
 
         if self.armed:
+
             row.alert = True
 
         row.prop(
@@ -908,23 +1522,38 @@ class VFDNode(Node):
         )
 
         box.label(
-            text=f"Frequency: {self.actual_frequency:.1f} Hz",
+            text=(
+                f"Frequency: "
+                f"{self.actual_frequency:.1f} Hz"
+            ),
         )
 
         box.label(
-            text=f"RPM: {self.actual_rpm:.0f}",
+            text=(
+                f"RPM: "
+                f"{self.actual_rpm:.0f}"
+            ),
         )
 
         box.label(
-            text=f"Current: {self.actual_current:.2f} A",
+            text=(
+                f"Current: "
+                f"{self.actual_current:.2f} A"
+            ),
         )
 
         box.label(
-            text=f"Voltage: {self.actual_voltage:.1f} V",
+            text=(
+                f"Voltage: "
+                f"{self.actual_voltage:.1f} V"
+            ),
         )
 
         box.label(
-            text=f"Power: {self.actual_power:.2f} kW",
+            text=(
+                f"Power: "
+                f"{self.actual_power:.2f} kW"
+            ),
         )
 
         if self.fault:
@@ -934,7 +1563,10 @@ class VFDNode(Node):
             row.alert = True
 
             row.label(
-                text=f"FAULT: {self.fault_code}",
+                text=(
+                    f"FAULT: "
+                    f"{self.fault_code}"
+                ),
                 icon="ERROR",
             )
 
@@ -950,6 +1582,13 @@ class VFDNode(Node):
             f"VFD "
             f"{self.device_name}"
         )
+
+
+# ============================================================================
+# REGISTER CLASSES
+# ============================================================================
+
+
 classes = (
     VFDValueSocket,
     VFDStatusSocket,
