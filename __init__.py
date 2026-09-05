@@ -13,7 +13,7 @@ import bpy
 from .vfd_node import (
     VFDValueSocket,
     VFDStatusSocket,
-    VFD_OT_console_execute,
+    VFD_OT_execute,
     VFD_OT_connect,
     VFD_OT_disconnect,
     VFDNode,
@@ -23,7 +23,7 @@ from .vfd_node import (
 classes = (
     VFDValueSocket,
     VFDStatusSocket,
-    VFD_OT_console_execute,
+    VFD_OT_execute,
     VFD_OT_connect,
     VFD_OT_disconnect,
     VFDNode,
@@ -41,5 +41,4 @@ def unregister():
 
 
 if __name__ == "__main__":
-    register()
     register()
