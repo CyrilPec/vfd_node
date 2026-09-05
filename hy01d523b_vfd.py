@@ -365,7 +365,7 @@ class HY01D523B:
         response = self._send(
             frame,
             expect_response=True,
-            response_size=8,
+            response_size=9,
         )
         if len(response) < 7:
             raise HY01D523BError(
