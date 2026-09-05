@@ -1,1 +1,205 @@
+VFD Node project — continuation log
 
+Repository: CyrilPec/vfd_node
+Current commit: 0dd7aff
+Target hardware: HY01D523B VFD
+Goal: control the VFD directly from the Blender Node UI, similar to Scn6Studio, but without the bridge and without a separate server.
+
+Current repository
+
+The runtime architecture should be:
+
+__init__.py
+vfd_node.py
+vfd_manager.py
+hy01d523b_vfd.py
+
+
+vfd_architecture.txt is documentation only and can be deleted if not needed.
+These old files were removed and should stay removed:
+
+driver_manager.py
+huanyang_vfd.py
+ModBus_vfd.py
+
+
+Do not reintroduce generic driver layers unless there is a real need.
+
+Architecture
+
+The desired architecture is:
+
+Blender VFD Node / Console
+        ↓
+    VFDManager
+        ↓
+   HY01D523B
+        ↓
+      RS-485
+        ↓
+   HY01D523B VFD
+
+
+hy01d523b_vfd.py must contain the actual HY protocol implementation.
+vfd_manager.py should contain high-level control/state/configuration only.
+vfd_node.py should contain Blender properties, UI, buttons and console command parsing.
+
+HY parameter requirement
+
+The VFD has parameters PD000 through PD182.
+We need to support:
+
+read PD000 ... PD182
+write PD000 ... PD182
+
+
+The manager should expose:
+
+read_parameter(parameter)
+write_parameter(parameter, value)
+
+
+The console should translate:
+
+get PD163
+read PD163
+set PD163 4
+write PD163 4
+
+
+into manager calls.
+Parameter validation should reject values outside PD000-PD182.
+
+Current console update
+
+Commit 0dd7aff added the PD command handling to vfd_node.py inside:
+
+def execute_command(self, command):
+
+
+The added commands are:
+
+get PD163
+read PD163
+set PD163 4
+write PD163 4
+
+
+The current implementation validates the parameter range and value range and calls:
+
+manager.read_parameter(parameter)
+manager.write_parameter(parameter, value)
+
+
+This is the correct location for console parsing. Do NOT put RS-485 protocol/frame construction in vfd_node.py.
+
+Important manager cleanup
+
+The previous manager architecture was too complicated. The desired final manager should directly use:
+
+from .hy01d523b_vfd import HY01D523B
+
+
+and create:
+
+self.vfd = HY01D523B(...)
+
+
+There should NOT be:
+
+VFDDriver
+HY01D523BAdapter
+driver_manager.py
+
+
+The manager should be a small HY-specific high-level controller.
+
+Connection configuration
+
+The Blender node has:
+
+serial_port
+slave_id
+baudrate
+
+
+Before connecting, these values must be passed to the manager:
+
+manager.configure_connection(
+    port=self.serial_port,
+    slave_id=self.slave_id,
+    baudrate=self.baudrate,
+    timeout=0.25,
+)
+
+
+Then:
+
+manager.connect()
+
+
+Do not rely only on manager defaults such as COM3 / slave 4 / 9600.
+
+HY communication
+
+Do NOT blindly change the low-level parameter packet format without checking the actual HY01D523B protocol and, preferably, a real response from the user's VFD.
+We need to verify:
+
+parameter read request
+parameter read response length
+CRC
+parameter write request
+write response
+address handling
+baud-rate setting
+communication mode
+The first safe diagnostic commands should be:
+connect
+status
+get PD163
+get PD164
+get PD165
+get PD181
+get PD182
+
+
+These should be used to determine the actual communication configuration and VFD information before writing parameters.
+
+Status
+
+Current get_local_status() is not yet a true live measurement/status query. Some fields are locally tracked/placeholders.
+Do not claim that current:
+
+current
+voltage
+power
+fault
+fault_code
+
+
+are real-time VFD measurements until the HY status registers/commands are implemented and tested.
+
+Next work
+Re-check 0dd7aff and the complete current files.
+Fix/verify __init__.py.
+Simplify vfd_manager.py to direct HY01D523B use.
+Verify vfd_node.py property names and manager configuration.
+Verify the exact HY01D523B PD read/write protocol in hy01d523b_vfd.py.
+Test:
+connect
+get PD163
+get PD164
+get PD165
+get PD181
+get PD182
+
+Add useful console logging showing:
+TX: ...
+RX: ...
+PD163 = ...
+
+Only after successful reads, implement safe PD writes.
+User preference
+
+Keep code clean and practical. The user wants copyable complete code when changes are requested, with fewer unnecessary layers and less scrolling. The old Node UI with a console is preferred because it makes VFD parameters easy to inspect.
+Do not add bridge/server architecture.
