@@ -262,6 +262,28 @@ class HY01D523BAdapter(VFDDriver):
         except Exception as exc:
             self.last_error = str(exc)
             return False
+    def read_pd(self, parameter: int):
+        if self.driver is None or not self.is_connected():
+            self.status.fault_text = "VFD is not connected."
+            return None
+        try:
+            value = self.driver.read_parameter(int(parameter))
+            return value
+        except Exception as exc:
+            self.status.fault_text = str(exc)
+            return None
+    def write_pd(self, parameter: int, value: int) -> bool:
+        if self.driver is None or not self.is_connected():
+            self.status.fault_text = "VFD is not connected."
+            return False
+        try:
+            result = bool(self.driver.write_parameter(int(parameter), int(value)))
+            if not result:
+                self._set_driver_error()
+            return result
+        except Exception as exc:
+            self.status.fault_text = str(exc)
+            return False
 class VFDManager:
     def __init__(self, driver: Optional[VFDDriver] = None, motor: Optional[VFDMotorConfig] = None):
         self.driver = driver
