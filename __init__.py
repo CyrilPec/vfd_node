@@ -1,7 +1,7 @@
 bl_info = {
     "name": "VFD Node",
     "author": "CyrilPec",
-    "version": (1, 0, 0),
+    "version": (1, 0, 1),
     "blender": (3, 6, 0),
     "location": "Node Editor",
     "description": "VFD control node",
@@ -13,12 +13,19 @@ import bpy
 from .vfd_node import (
     VFDValueSocket,
     VFDStatusSocket,
+    VFD_OT_console_execute,
+    VFD_OT_connect,
+    VFD_OT_disconnect,
     VFDNode,
 )
+
 
 classes = (
     VFDValueSocket,
     VFDStatusSocket,
+    VFD_OT_console_execute,
+    VFD_OT_connect,
+    VFD_OT_disconnect,
     VFDNode,
 )
 
@@ -34,4 +41,5 @@ def unregister():
 
 
 if __name__ == "__main__":
+    register()
     register()
