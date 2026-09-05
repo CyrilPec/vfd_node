@@ -76,6 +76,10 @@ class VFDDriver:
         raise NotImplementedError
     def get_status(self) -> VFDStatus:
         raise NotImplementedError
+    def read_parameter(self, parameter: int):
+        raise NotImplementedError
+    def write_parameter(self, parameter: int, value: int) -> bool:
+        raise NotImplementedError
 class HY01D523BAdapter(VFDDriver):
     name = "HY01D523B"
     def __init__(self, port: str, slave_id: int = 4, baudrate: int = 9600, timeout: float = 0.25):
@@ -86,9 +90,6 @@ class HY01D523BAdapter(VFDDriver):
         self.serial = None
         self.driver = None
         self.last_error = ""
-        self.frequency_hz = 0.0
-        self.running = False
-        self.reverse = False
     def connect(self) -> bool:
         if serial is None:
             self.last_error = "pyserial is not installed."
@@ -103,6 +104,9 @@ class HY01D523BAdapter(VFDDriver):
                     stopbits=serial.STOPBITS_ONE,
                     timeout=self.timeout,
                     write_timeout=self.timeout,
+                    rtscts=False,
+                    dsrdtr=False,
+                    xonxoff=False,
                 )
             elif not self.serial.is_open:
                 self.serial.open()
@@ -112,9 +116,8 @@ class HY01D523BAdapter(VFDDriver):
                 baudrate=self.baudrate,
                 timeout=self.timeout,
             )
-            result = bool(self.driver.connect())
-            if not result:
-                self.last_error = getattr(self.driver, "last_error", "Connection failed")
+            if not self.driver.connect():
+                self.last_error = getattr(self.driver, "last_error", "Connection failed.")
                 return False
             self.last_error = ""
             return True
@@ -134,7 +137,6 @@ class HY01D523BAdapter(VFDDriver):
                 self.serial.close()
         except Exception:
             pass
-        self.running = False
     def is_connected(self) -> bool:
         if self.driver is None:
             return False
@@ -147,14 +149,9 @@ class HY01D523BAdapter(VFDDriver):
             self.last_error = "VFD is not connected."
             return False
         try:
-            if self.reverse:
-                result = bool(self.driver.reverse_run())
-            else:
-                result = bool(self.driver.run())
-            if result:
-                self.running = True
-            else:
-                self.last_error = getattr(self.driver, "last_error", "Start failed")
+            result = bool(self.driver.reverse_run() if self.driver.reverse else self.driver.run())
+            if not result:
+                self.last_error = getattr(self.driver, "last_error", "Start failed.")
             return result
         except Exception as exc:
             self.last_error = str(exc)
@@ -165,10 +162,8 @@ class HY01D523BAdapter(VFDDriver):
             return False
         try:
             result = bool(self.driver.stop())
-            if result:
-                self.running = False
-            else:
-                self.last_error = getattr(self.driver, "last_error", "Stop failed")
+            if not result:
+                self.last_error = getattr(self.driver, "last_error", "Stop failed.")
             return result
         except Exception as exc:
             self.last_error = str(exc)
@@ -176,7 +171,7 @@ class HY01D523BAdapter(VFDDriver):
     def emergency_stop(self) -> bool:
         return self.stop()
     def reset_fault(self) -> bool:
-        self.last_error = "HY01D523B fault reset is not implemented yet."
+        self.last_error = "HY01D523B fault reset is not implemented."
         return False
     def set_frequency(self, frequency_hz: float) -> bool:
         if not self.is_connected():
@@ -184,15 +179,14 @@ class HY01D523BAdapter(VFDDriver):
             return False
         try:
             result = bool(self.driver.set_frequency(float(frequency_hz)))
-            if result:
-                self.frequency_hz = float(frequency_hz)
-            else:
-                self.last_error = getattr(self.driver, "last_error", "Frequency command failed")
+            if not result:
+                self.last_error = getattr(self.driver, "last_error", "Frequency command failed.")
             return result
         except Exception as exc:
             self.last_error = str(exc)
             return False
     def set_speed(self, rpm: float) -> bool:
+        self.last_error = "RPM control is handled by VFDManager."
         return False
     def set_direction(self, direction: VFDDirection) -> bool:
         if not self.is_connected():
@@ -201,32 +195,23 @@ class HY01D523BAdapter(VFDDriver):
         try:
             if direction == VFDDirection.REVERSE:
                 result = bool(self.driver.reverse_run())
-                if result:
-                    self.reverse = True
-                    self.running = True
             else:
                 result = bool(self.driver.forward())
-                if result:
-                    self.reverse = False
-                    self.running = True
             if not result:
-                self.last_error = getattr(self.driver, "last_error", "Direction command failed")
+                self.last_error = getattr(self.driver, "last_error", "Direction command failed.")
             return result
         except Exception as exc:
             self.last_error = str(exc)
             return False
     def get_status(self) -> VFDStatus:
         if self.driver is None:
-            return VFDStatus(
-                connected=False,
-                state=VFDState.DISCONNECTED,
-            )
+            return VFDStatus()
         try:
             raw = self.driver.get_local_status()
             connected = bool(raw.get("connected", False))
             running = bool(raw.get("running", False))
             reverse = bool(raw.get("reverse", False))
-            frequency = float(raw.get("frequency", self.frequency_hz))
+            frequency = float(raw.get("frequency", 0.0))
             fault = bool(raw.get("fault", False))
             fault_code = int(raw.get("fault_code", 0))
             error = str(raw.get("error", ""))
@@ -244,7 +229,6 @@ class HY01D523BAdapter(VFDDriver):
                 running=running,
                 direction=VFDDirection.REVERSE if reverse else VFDDirection.FORWARD,
                 frequency_hz=frequency,
-                rpm=0.0,
                 fault=fault,
                 fault_code=fault_code,
                 fault_text=error,
@@ -271,7 +255,10 @@ class HY01D523BAdapter(VFDDriver):
             self.last_error = "VFD is not connected."
             return False
         try:
-            return bool(self.driver.write_parameter(int(parameter), int(value)))
+            result = bool(self.driver.write_parameter(int(parameter), int(value)))
+            if not result:
+                self.last_error = getattr(self.driver, "last_error", "Parameter write failed.")
+            return result
         except Exception as exc:
             self.last_error = str(exc)
             return False
@@ -282,20 +269,24 @@ class VFDManager:
         self.status = VFDStatus()
         self.enabled = True
         self.armed = False
-        self.target_frequency_hz = 0.0
-        self.target_rpm = 0.0
-        self.target_running = False
-        self.target_direction = VFDDirection.FORWARD
         self.serial_port = "COM3"
         self.slave_id = 4
         self.baudrate = 9600
         self.timeout = 0.25
-    def configure_connection(self, port: str, slave_id: int = 4, baudrate: int = 9600, timeout: float = 0.25):
+        self.target_frequency_hz = 0.0
+        self.target_rpm = 0.0
+        self.target_running = False
+        self.target_direction = VFDDirection.FORWARD
+    def configure_connection(self, port: str, slave_id: int = 4, baudrate: int = 9600, timeout: float = 0.25) -> None:
+        port = str(port)
+        slave_id = int(slave_id)
+        baudrate = int(baudrate)
+        timeout = float(timeout)
         changed = (
-            str(port) != self.serial_port
-            or int(slave_id) != self.slave_id
-            or int(baudrate) != self.baudrate
-            or float(timeout) != self.timeout
+            port != self.serial_port
+            or slave_id != self.slave_id
+            or baudrate != self.baudrate
+            or timeout != self.timeout
         )
         if changed and self.driver is not None:
             try:
@@ -303,24 +294,23 @@ class VFDManager:
             except Exception:
                 pass
             self.driver = None
-        self.serial_port = str(port)
-        self.slave_id = int(slave_id)
-        self.baudrate = int(baudrate)
-        self.timeout = float(timeout)
-    def create_hy01d523b_driver(self):
-        if self.driver is None:
-            self.driver = HY01D523BAdapter(
-                port=self.serial_port,
-                slave_id=self.slave_id,
-                baudrate=self.baudrate,
-                timeout=self.timeout,
-            )
+        self.serial_port = port
+        self.slave_id = slave_id
+        self.baudrate = baudrate
+        self.timeout = timeout
+    def create_hy01d523b_driver(self) -> VFDDriver:
+        self.driver = HY01D523BAdapter(
+            port=self.serial_port,
+            slave_id=self.slave_id,
+            baudrate=self.baudrate,
+            timeout=self.timeout,
+        )
         return self.driver
     def set_driver(self, driver: Optional[VFDDriver]) -> None:
         self.driver = driver
         if driver is None:
             self._set_disconnected()
-    def get_driver(self):
+    def get_driver(self) -> Optional[VFDDriver]:
         return self.driver
     def get_driver_name(self) -> str:
         if self.driver is None:
@@ -329,17 +319,16 @@ class VFDManager:
     def connect(self) -> bool:
         if self.driver is None:
             self.create_hy01d523b_driver()
-        if self.driver is None:
-            self._set_error("No VFD driver available.")
-            return False
         try:
             result = bool(self.driver.connect())
             if result:
                 self.status.connected = True
                 self.status.state = VFDState.READY
+                self.status.fault = False
+                self.status.fault_code = 0
                 self.status.fault_text = ""
             else:
-                self._set_error(getattr(self.driver, "last_error", "Connection failed"))
+                self._set_error(getattr(self.driver, "last_error", "Connection failed."))
             return result
         except Exception as exc:
             self._set_error(str(exc))
@@ -367,7 +356,7 @@ class VFDManager:
         if not self.armed:
             self.target_running = False
     def can_command(self) -> bool:
-        return self.enabled and self.armed and self.driver is not None and self.is_connected()
+        return bool(self.enabled and self.armed and self.is_connected())
     def start(self) -> bool:
         if not self.can_command():
             self.status.fault_text = "VFD is not enabled, armed and connected."
@@ -378,6 +367,7 @@ class VFDManager:
                 self.target_running = True
                 self.status.running = True
                 self.status.state = VFDState.RUNNING
+                self.status.direction = self.target_direction
             else:
                 self._set_driver_error()
             return result
@@ -401,20 +391,7 @@ class VFDManager:
             self._set_error(str(exc))
             return False
     def emergency_stop(self) -> bool:
-        if self.driver is None or not self.is_connected():
-            return False
-        try:
-            result = bool(self.driver.emergency_stop())
-            if result:
-                self.target_running = False
-                self.status.running = False
-                self.status.state = VFDState.EMERGENCY_STOP
-            else:
-                self._set_driver_error()
-            return result
-        except Exception as exc:
-            self._set_error(str(exc))
-            return False
+        return self.stop()
     def reset_fault(self) -> bool:
         if self.driver is None or not self.is_connected():
             self.status.fault_text = "VFD is not connected."
@@ -462,6 +439,8 @@ class VFDManager:
             result = bool(self.driver.set_direction(direction))
             if result:
                 self.status.direction = direction
+                self.status.running = True
+                self.status.state = VFDState.RUNNING
             else:
                 self._set_driver_error()
             return result
@@ -490,20 +469,19 @@ class VFDManager:
             return self.status
         try:
             self.status = self.driver.get_status()
-            return self.status
         except Exception as exc:
             self._set_error(str(exc))
-            return self.status
+        return self.status
     def get_status(self) -> VFDStatus:
         return self.status
     def apply_command(self, *, run: Optional[bool] = None, frequency_hz: Optional[float] = None, rpm: Optional[float] = None, reverse: Optional[bool] = None, reset: bool = False) -> bool:
         success = True
-        if reset and not self.reset_fault():
-            success = False
+        if reset:
+            if not self.reset_fault():
+                success = False
         if reverse is not None:
             direction = VFDDirection.REVERSE if reverse else VFDDirection.FORWARD
-            if not self.set_direction(direction):
-                success = False
+            self.target_direction = direction
         if frequency_hz is not None:
             if not self.set_frequency(frequency_hz):
                 success = False
@@ -540,25 +518,26 @@ class VFDManager:
         if max_rpm is not None:
             self.motor.max_rpm = float(max_rpm)
     def read_parameter(self, parameter: int):
-        driver = self.driver
-        if driver is None or not self.is_connected():
+        if self.driver is None or not self.is_connected():
             self.status.fault_text = "VFD is not connected."
             return None
-        reader = getattr(driver, "read_parameter", None)
-        if not callable(reader):
-            self.status.fault_text = "Driver does not support parameter reading."
+        try:
+            return self.driver.read_parameter(int(parameter))
+        except Exception as exc:
+            self.status.fault_text = str(exc)
             return None
-        return reader(int(parameter))
     def write_parameter(self, parameter: int, value: int) -> bool:
-        driver = self.driver
-        if driver is None or not self.is_connected():
+        if self.driver is None or not self.is_connected():
             self.status.fault_text = "VFD is not connected."
             return False
-        writer = getattr(driver, "write_parameter", None)
-        if not callable(writer):
-            self.status.fault_text = "Driver does not support parameter writing."
+        try:
+            result = bool(self.driver.write_parameter(int(parameter), int(value)))
+            if not result:
+                self._set_driver_error()
+            return result
+        except Exception as exc:
+            self.status.fault_text = str(exc)
             return False
-        return bool(writer(int(parameter), int(value)))
     def get_parameter(self, parameter: int):
         return self.read_parameter(parameter)
     def set_parameter(self, parameter: int, value: int) -> bool:
@@ -569,7 +548,7 @@ class VFDManager:
         return self.status.fault_text
     def _set_driver_error(self) -> None:
         if self.driver is not None:
-            self.status.fault_text = str(getattr(self.driver, "last_error", "VFD command failed"))
+            self.status.fault_text = str(getattr(self.driver, "last_error", "VFD command failed."))
     def _set_disconnected(self) -> None:
         self.status.connected = False
         self.status.running = False
