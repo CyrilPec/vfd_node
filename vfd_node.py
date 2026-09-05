@@ -162,24 +162,32 @@ class VFDNode(Node):
         return create_vfd_manager(self)
     def update_manager_config(self):
         manager = self.get_manager()
-        manager.configure_motor(
+        manager.configure_connection(
+            port=self.serial_port,
+            slave_id=self.slave_id,
+            baudrate=self.baudrate,
+            timeout=0.25,
+        )
+            manager.configure_motor(
             power_kw=self.motor_power_kw,
-            voltage_v=self.motor_voltage,
-            rated_frequency_hz=self.motor_frequency,
-            rated_rpm=self.motor_rpm,
-            min_frequency_hz=self.minimum_frequency,
-            max_frequency_hz=self.maximum_frequency,
-            min_rpm=self.minimum_rpm,
-            max_rpm=self.maximum_rpm,
+            voltage_v=self.motor_voltage_v,
+            rated_frequency_hz=self.rated_frequency_hz,
+            rated_rpm=self.rated_rpm,
+            rated_current_a=self.rated_current_a,
+            poles=self.motor_poles,
+            min_frequency_hz=self.min_frequency_hz,
+            max_frequency_hz=self.max_frequency_hz,
+            min_rpm=self.min_rpm,
+            max_rpm=self.max_rpm,
         )
         manager.set_enabled(self.enabled)
         manager.set_armed(self.armed)
     def connect_vfd(self):
-        manager = self.get_manager()
         self.update_manager_config()
-        result = manager.connect()
+        result = self.get_manager().connect()
         self.update_status()
-        return result
+    return result
+
     def disconnect_vfd(self):
         manager = self.get_manager()
         manager.disconnect()
