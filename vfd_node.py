@@ -862,6 +862,14 @@ class VFDNode(Node):
         parts = text.split()
         operation = parts[0].lower()
 
+        if operation == "__apply__":
+            if self.apply_command():
+                return "OK: Command applied"
+
+            return (
+                f"ERROR: {manager.last_error()}"
+            )
+
         # --------------------------------------------------------------
         # CONNECT
         # --------------------------------------------------------------
@@ -1426,7 +1434,7 @@ class VFDNode(Node):
         )
 
         operator.node_name = self.name
-        operator.command = ""
+        operator.command = "__APPLY__"
 
         # Status
 
