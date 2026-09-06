@@ -1,14 +1,17 @@
+```python
 from __future__ import annotations
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Optional
 from .hy01d523b_vfd import HY01D523B
+
 class VFDState(Enum):
     DISCONNECTED = "disconnected"
     READY = "ready"
     RUNNING = "running"
     STOPPED = "stopped"
     FAULT = "fault"
+
 @dataclass
 class VFDStatus:
     connected: bool = False
@@ -24,7 +27,8 @@ class VFDStatus:
     fault: bool = False
     fault_code: int = 0
     fault_text: str = ""
-    raw: dict[str, Any] = None
+    raw: dict[str, Any] = field(default_factory=dict)
+
 class VFDManager:
     def __init__(self, motor=None):
         self.motor = motor
@@ -39,12 +43,14 @@ class VFDManager:
         self.target_rpm = 0.0
         self.target_running = False
         self.target_reverse = False
-        self.status = VFDStatus(raw={})
+        self.status = VFDStatus()
+
     def configure_connection(self, port, slave_id=4, baudrate=9600, timeout=0.25):
         self.serial_port = str(port)
         self.slave_id = int(slave_id)
         self.baudrate = int(baudrate)
         self.timeout = float(timeout)
+
     def configure_motor(self, power_kw=None, voltage_v=None, rated_frequency_hz=None, rated_rpm=None, rated_current_a=None, poles=None, min_frequency_hz=None, max_frequency_hz=None, min_rpm=None, max_rpm=None):
         if self.motor is None:
             return
@@ -63,6 +69,7 @@ class VFDManager:
         for name, value in values.items():
             if value is not None and hasattr(self.motor, name):
                 setattr(self.motor, name, value)
+
     def connect(self):
         self.disconnect()
         try:
@@ -72,19 +79,20 @@ class VFDManager:
                 baudrate=self.baudrate,
                 timeout=self.timeout,
             )
-            result = bool(self.vfd.connect())
-            if result:
-                self.status = VFDStatus(
-                    connected=True,
-                    state=VFDState.READY,
-                    raw={},
-                )
-            else:
-                self._error(self.last_error())
-            return result
+            if not self.vfd.connect():
+                self._error(self.last_error() or "VFD connection failed.")
+                self.vfd = None
+                return False
+            self.status = VFDStatus(
+                connected=True,
+                state=VFDState.READY,
+            )
+            return True
         except Exception as exc:
+            self.vfd = None
             self._error(str(exc))
             return False
+
     def disconnect(self):
         if self.vfd is not None:
             try:
@@ -95,6 +103,7 @@ class VFDManager:
         self.status.connected = False
         self.status.running = False
         self.status.state = VFDState.DISCONNECTED
+
     def is_connected(self):
         if self.vfd is None:
             return False
@@ -102,124 +111,128 @@ class VFDManager:
             return bool(self.vfd.is_connected())
         except Exception:
             return False
+
     def set_enabled(self, enabled):
         self.enabled = bool(enabled)
         if not self.enabled:
             self.target_running = False
+
     def set_armed(self, armed):
         self.armed = bool(armed)
         if not self.armed:
             self.target_running = False
+
     def can_command(self):
         return self.enabled and self.armed and self.is_connected()
+
     def start(self):
         if not self.can_command():
             self._error("VFD is not enabled, armed and connected.")
             return False
         try:
-            if self.target_reverse:
-                result = bool(self.vfd.reverse_run())
-            else:
-                result = bool(self.vfd.run())
+            result = self.vfd.reverse_run() if self.target_reverse else self.vfd.run()
             if result:
                 self.target_running = True
                 self.status.running = True
                 self.status.reverse = self.target_reverse
                 self.status.state = VFDState.RUNNING
             else:
-                self._error(self.last_error())
-            return result
+                self._error(self.last_error() or "VFD start command failed.")
+            return bool(result)
         except Exception as exc:
             self._error(str(exc))
             return False
+
     def stop(self):
         if not self.is_connected():
             self._error("VFD is not connected.")
             return False
         try:
-            result = bool(self.vfd.stop())
+            result = self.vfd.stop()
             if result:
                 self.target_running = False
                 self.status.running = False
                 self.status.state = VFDState.STOPPED
             else:
-                self._error(self.last_error())
-            return result
+                self._error(self.last_error() or "VFD stop command failed.")
+            return bool(result)
         except Exception as exc:
             self._error(str(exc))
             return False
+
     def emergency_stop(self):
         return self.stop()
+
     def set_frequency(self, frequency_hz):
         frequency_hz = float(frequency_hz)
-        if self.motor is not None:
-            minimum = float(getattr(self.motor, "min_frequency_hz", 0.0))
-            maximum = float(getattr(self.motor, "max_frequency_hz", 400.0))
-            frequency_hz = max(minimum, min(frequency_hz, maximum))
+        minimum = self._motor_value("min_frequency_hz", 0.0)
+        maximum = self._motor_value("max_frequency_hz", 400.0)
+        frequency_hz = max(minimum, min(frequency_hz, maximum))
         self.target_frequency_hz = frequency_hz
-        if self.motor is not None:
-            rated_frequency = float(getattr(self.motor, "rated_frequency_hz", 400.0))
-            rated_rpm = float(getattr(self.motor, "rated_rpm", 24000.0))
-            if rated_frequency > 0:
-                self.target_rpm = frequency_hz / rated_frequency * rated_rpm
+        rated_frequency = self._motor_value("rated_frequency_hz", 400.0)
+        rated_rpm = self._motor_value("rated_rpm", 24000.0)
+        if rated_frequency > 0:
+            self.target_rpm = frequency_hz / rated_frequency * rated_rpm
         if not self.can_command():
             self._error("VFD is not enabled, armed and connected.")
             return False
         try:
-            result = bool(self.vfd.set_frequency(frequency_hz))
+            result = self.vfd.set_frequency(frequency_hz)
             if result:
                 self.status.frequency_hz = frequency_hz
                 self.status.rpm = self.target_rpm
             else:
-                self._error(self.last_error())
-            return result
+                self._error(self.last_error() or "VFD frequency command failed.")
+            return bool(result)
         except Exception as exc:
             self._error(str(exc))
             return False
+
     def set_speed(self, rpm):
         rpm = float(rpm)
-        if self.motor is not None:
-            minimum = float(getattr(self.motor, "min_rpm", 0.0))
-            maximum = float(getattr(self.motor, "max_rpm", 24000.0))
-            rpm = max(minimum, min(rpm, maximum))
-            rated_rpm = float(getattr(self.motor, "rated_rpm", 24000.0))
-            rated_frequency = float(getattr(self.motor, "rated_frequency_hz", 400.0))
-            if rated_rpm > 0:
-                return self.set_frequency(rpm / rated_rpm * rated_frequency)
+        minimum = self._motor_value("min_rpm", 0.0)
+        maximum = self._motor_value("max_rpm", 24000.0)
+        rpm = max(minimum, min(rpm, maximum))
+        rated_rpm = self._motor_value("rated_rpm", 24000.0)
+        rated_frequency = self._motor_value("rated_frequency_hz", 400.0)
+        if rated_rpm <= 0:
+            self._error("Motor rated RPM must be greater than zero.")
+            return False
         self.target_rpm = rpm
-        return False
+        return self.set_frequency(rpm / rated_rpm * rated_frequency)
+
     def set_direction(self, reverse):
         self.target_reverse = bool(reverse)
         if not self.can_command():
             self._error("VFD is not enabled, armed and connected.")
             return False
         try:
-            if self.target_reverse:
-                result = bool(self.vfd.reverse_run())
-            else:
-                result = bool(self.vfd.forward())
+            result = self.vfd.reverse_run() if self.target_reverse else self.vfd.forward()
             if result:
                 self.status.reverse = self.target_reverse
                 self.status.running = True
                 self.status.state = VFDState.RUNNING
+                self.target_running = True
             else:
-                self._error(self.last_error())
-            return result
+                self._error(self.last_error() or "VFD direction command failed.")
+            return bool(result)
         except Exception as exc:
             self._error(str(exc))
             return False
+
     def update_status(self):
-        if self.vfd is None:
+        if not self.is_connected():
             self.status.connected = False
+            self.status.running = False
             self.status.state = VFDState.DISCONNECTED
             return self.status
         try:
             raw = self.vfd.get_local_status()
-            self.status.connected = bool(raw.get("connected", self.is_connected()))
+            self.status.connected = bool(raw.get("connected", True))
             self.status.running = bool(raw.get("running", False))
             self.status.reverse = bool(raw.get("reverse", False))
-            self.status.frequency_hz = float(raw.get("frequency", 0.0))
-            self.status.rpm = self.target_rpm
+            self.status.frequency_hz = float(raw.get("frequency", self.target_frequency_hz))
+            self.status.rpm = self._frequency_to_rpm(self.status.frequency_hz)
             self.status.fault = bool(raw.get("fault", False))
             self.status.fault_code = int(raw.get("fault_code", 0))
             self.status.fault_text = str(raw.get("error", ""))
@@ -235,10 +248,16 @@ class VFDManager:
         except Exception as exc:
             self._error(str(exc))
         return self.status
+
     def get_status(self):
         return self.status
+
     def read_parameter(self, parameter):
-        parameter = self._validate_parameter(parameter)
+        try:
+            parameter = self._validate_parameter(parameter)
+        except (TypeError, ValueError) as exc:
+            self._error(str(exc))
+            return None
         if not self.is_connected():
             self._error("VFD is not connected.")
             return None
@@ -247,32 +266,62 @@ class VFDManager:
         except Exception as exc:
             self._error(str(exc))
             return None
+
     def write_parameter(self, parameter, value):
-        parameter = self._validate_parameter(parameter)
-        value = int(value)
+        try:
+            parameter = self._validate_parameter(parameter)
+            value = int(value)
+        except (TypeError, ValueError) as exc:
+            self._error(str(exc))
+            return False
+        if not 0 <= value <= 0xFFFF:
+            self._error("Parameter value must be between 0 and 65535.")
+            return False
         if not self.is_connected():
             self._error("VFD is not connected.")
             return False
         try:
-            result = bool(self.vfd.write_parameter(parameter, value))
+            result = self.vfd.write_parameter(parameter, value)
             if not result:
-                self._error(self.last_error())
-            return result
+                self._error(self.last_error() or "VFD parameter write failed.")
+            return bool(result)
         except Exception as exc:
             self._error(str(exc))
             return False
+
     def read_pd(self, parameter):
         return self.read_parameter(parameter)
+
     def write_pd(self, parameter, value):
         return self.write_parameter(parameter, value)
+
     def _validate_parameter(self, parameter):
         parameter = int(parameter)
-        if parameter < 0 or parameter > 182:
+        if not 0 <= parameter <= 182:
             raise ValueError("HY01D523B parameter must be PD000 through PD182.")
         return parameter
+
     def last_error(self):
         if self.vfd is not None:
             return str(getattr(self.vfd, "last_error", ""))
         return self.status.fault_text
+
     def _error(self, message):
+        self.status.fault = True
         self.status.fault_text = str(message)
+
+    def _motor_value(self, name, default):
+        if self.motor is None:
+            return float(default)
+        try:
+            return float(getattr(self.motor, name, default))
+        except (TypeError, ValueError):
+            return float(default)
+
+    def _frequency_to_rpm(self, frequency_hz):
+        rated_frequency = self._motor_value("rated_frequency_hz", 400.0)
+        rated_rpm = self._motor_value("rated_rpm", 24000.0)
+        if rated_frequency <= 0:
+            return 0.0
+        return float(frequency_hz) / rated_frequency * rated_rpm
+```
