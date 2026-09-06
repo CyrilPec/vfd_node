@@ -1,7 +1,7 @@
-
 from __future__ import annotations
 
 import bpy
+
 from bpy.types import Node
 from bpy.props import (
     BoolProperty,
@@ -17,7 +17,7 @@ except ImportError:
 
 
 # ----------------------------------------------------------------------
-# VFD manager storage
+# MANAGER STORAGE
 # ----------------------------------------------------------------------
 
 _MANAGERS = {}
@@ -61,7 +61,7 @@ def remove_vfd_manager(node):
 
 
 # ----------------------------------------------------------------------
-# Node search
+# NODE SEARCH
 # ----------------------------------------------------------------------
 
 def find_node(name):
@@ -75,7 +75,7 @@ def find_node(name):
 
 
 # ----------------------------------------------------------------------
-# Operators
+# OPERATORS
 # ----------------------------------------------------------------------
 
 class VFD_OT_connect(bpy.types.Operator):
@@ -88,13 +88,19 @@ class VFD_OT_connect(bpy.types.Operator):
         node = find_node(self.node_name)
 
         if node is None:
-            self.report({"ERROR"}, "VFD node not found")
+            self.report(
+                {"ERROR"},
+                "VFD node not found",
+            )
             return {"CANCELLED"}
 
         if node.connect_vfd():
             return {"FINISHED"}
 
-        self.report({"ERROR"}, node.status_text)
+        self.report(
+            {"ERROR"},
+            node.status_text,
+        )
 
         return {"CANCELLED"}
 
@@ -109,7 +115,10 @@ class VFD_OT_disconnect(bpy.types.Operator):
         node = find_node(self.node_name)
 
         if node is None:
-            self.report({"ERROR"}, "VFD node not found")
+            self.report(
+                {"ERROR"},
+                "VFD node not found",
+            )
             return {"CANCELLED"}
 
         node.disconnect_vfd()
@@ -128,22 +137,30 @@ class VFD_OT_execute(bpy.types.Operator):
         node = find_node(self.node_name)
 
         if node is None:
-            self.report({"ERROR"}, "VFD node not found")
+            self.report(
+                {"ERROR"},
+                "VFD node not found",
+            )
             return {"CANCELLED"}
 
-        result = node.execute_command(self.command)
+        result = node.execute_command(
+            self.command
+        )
 
         node.console_output = result
 
         if result.startswith("ERROR"):
-            self.report({"ERROR"}, result)
+            self.report(
+                {"ERROR"},
+                result,
+            )
             return {"CANCELLED"}
 
         return {"FINISHED"}
 
 
 # ----------------------------------------------------------------------
-# VFD Node
+# VFD NODE
 # ----------------------------------------------------------------------
 
 class VFDNode(Node):
@@ -152,7 +169,7 @@ class VFDNode(Node):
     bl_icon = "DRIVER"
 
     # ------------------------------------------------------------------
-    # Connection
+    # CONNECTION
     # ------------------------------------------------------------------
 
     device_name: StringProperty(
@@ -180,7 +197,7 @@ class VFDNode(Node):
     )
 
     # ------------------------------------------------------------------
-    # Enable / arm
+    # SAFETY
     # ------------------------------------------------------------------
 
     enabled: BoolProperty(
@@ -194,10 +211,7 @@ class VFDNode(Node):
     )
 
     # ------------------------------------------------------------------
-    # Motor configuration
-    #
-    # These values are used only for frequency <-> RPM conversion.
-    # They are not required by the HY01D523B protocol.
+    # MOTOR
     # ------------------------------------------------------------------
 
     motor_power_kw: FloatProperty(
@@ -249,7 +263,7 @@ class VFDNode(Node):
     )
 
     # ------------------------------------------------------------------
-    # Command properties
+    # COMMAND
     # ------------------------------------------------------------------
 
     frequency_command: FloatProperty(
@@ -280,11 +294,7 @@ class VFDNode(Node):
     )
 
     # ------------------------------------------------------------------
-    # Status properties
-    #
-    # Only values currently supported by the manager are treated as
-    # meaningful. Current/voltage/power are kept as zero until the
-    # actual HY01D523B status protocol is implemented.
+    # STATUS
     # ------------------------------------------------------------------
 
     connected: BoolProperty(
@@ -313,12 +323,12 @@ class VFDNode(Node):
     )
 
     actual_frequency: FloatProperty(
-        name="Actual Frequency",
+        name="Frequency",
         default=0.0,
     )
 
     actual_rpm: FloatProperty(
-        name="Actual RPM",
+        name="Estimated RPM",
         default=0.0,
     )
 
@@ -343,7 +353,7 @@ class VFDNode(Node):
     )
 
     # ------------------------------------------------------------------
-    # Console
+    # CONSOLE
     # ------------------------------------------------------------------
 
     console_command: StringProperty(
@@ -357,7 +367,7 @@ class VFDNode(Node):
     )
 
     # ------------------------------------------------------------------
-    # Node initialization
+    # NODE INITIALIZATION
     # ------------------------------------------------------------------
 
     def init(self, context):
@@ -397,60 +407,60 @@ class VFDNode(Node):
 
         # Outputs
 
-        frequency = self.outputs.new(
+        self.outputs.new(
             "NodeSocketFloat",
             "Frequency",
         )
 
-        rpm = self.outputs.new(
+        self.outputs.new(
             "NodeSocketFloat",
             "RPM",
         )
 
-        current = self.outputs.new(
+        self.outputs.new(
             "NodeSocketFloat",
             "Current",
         )
 
-        voltage = self.outputs.new(
+        self.outputs.new(
             "NodeSocketFloat",
             "Voltage",
         )
 
-        power = self.outputs.new(
+        self.outputs.new(
             "NodeSocketFloat",
             "Power",
         )
 
-        connected = self.outputs.new(
+        self.outputs.new(
             "NodeSocketBool",
             "Connected",
         )
 
-        running = self.outputs.new(
+        self.outputs.new(
             "NodeSocketBool",
             "Running",
         )
 
-        fault = self.outputs.new(
+        self.outputs.new(
             "NodeSocketBool",
             "Fault",
         )
 
-        fault_code = self.outputs.new(
+        self.outputs.new(
             "NodeSocketFloat",
             "Fault Code",
         )
 
     # ------------------------------------------------------------------
-    # Node cleanup
+    # CLEANUP
     # ------------------------------------------------------------------
 
     def free(self):
         remove_vfd_manager(self)
 
     # ------------------------------------------------------------------
-    # Manager
+    # MANAGER
     # ------------------------------------------------------------------
 
     def get_manager(self):
@@ -477,11 +487,16 @@ class VFDNode(Node):
             max_rpm=self.maximum_rpm,
         )
 
-        manager.set_enabled(self.enabled)
-        manager.set_armed(self.armed)
+        manager.set_enabled(
+            self.enabled
+        )
+
+        manager.set_armed(
+            self.armed
+        )
 
     # ------------------------------------------------------------------
-    # Connection
+    # CONNECTION
     # ------------------------------------------------------------------
 
     def connect_vfd(self):
@@ -503,54 +518,109 @@ class VFDNode(Node):
         self.update_status()
 
     # ------------------------------------------------------------------
-    # Socket helpers
+    # SOCKET HELPERS
     # ------------------------------------------------------------------
 
-    def _socket_float(self, name, default):
+    def _socket_float(
+        self,
+        name,
+        default,
+    ):
         socket = self.inputs.get(name)
 
         if socket is None:
             return default
 
         try:
-            return float(socket.default_value)
+            if socket.is_linked:
+                source = socket.links[0].from_socket
+                return float(
+                    source.default_value
+                )
+
+            return float(
+                socket.default_value
+            )
+
         except Exception:
             return default
 
-    def _socket_bool(self, name, default):
+    def _socket_bool(
+        self,
+        name,
+        default,
+    ):
         socket = self.inputs.get(name)
 
         if socket is None:
             return default
 
         try:
-            return bool(socket.default_value)
+            if socket.is_linked:
+                source = socket.links[0].from_socket
+                return bool(
+                    source.default_value
+                )
+
+            return bool(
+                socket.default_value
+            )
+
         except Exception:
             return default
 
     # ------------------------------------------------------------------
-    # Command values
+    # COMMAND VALUES
     # ------------------------------------------------------------------
 
     def get_command(self):
-        frequency = float(self.frequency_command)
-        rpm = float(self.rpm_command)
+        frequency = float(
+            self.frequency_command
+        )
 
-        rpm_socket = self.inputs.get("RPM")
-        frequency_socket = self.inputs.get("Frequency")
+        rpm = float(
+            self.rpm_command
+        )
 
-        # RPM input has priority when it is connected.
+        rpm_socket = self.inputs.get(
+            "RPM"
+        )
 
-        if rpm_socket is not None and rpm_socket.is_linked:
-            rpm = self._socket_float("RPM", rpm)
-            frequency = self.rpm_to_frequency(rpm)
+        frequency_socket = self.inputs.get(
+            "Frequency"
+        )
 
-        elif frequency_socket is not None and frequency_socket.is_linked:
+        # RPM takes priority when connected.
+
+        if (
+            rpm_socket is not None
+            and rpm_socket.is_linked
+        ):
+            rpm = self._socket_float(
+                "RPM",
+                rpm,
+            )
+
+            frequency = (
+                self.rpm_to_frequency(
+                    rpm
+                )
+            )
+
+        elif (
+            frequency_socket is not None
+            and frequency_socket.is_linked
+        ):
             frequency = self._socket_float(
                 "Frequency",
                 frequency,
             )
-            rpm = self.frequency_to_rpm(frequency)
+
+            rpm = (
+                self.frequency_to_rpm(
+                    frequency
+                )
+            )
 
         run = self._socket_bool(
             "RUN",
@@ -567,10 +637,10 @@ class VFDNode(Node):
             self.reset_command,
         )
 
-        # Safety:
-        # disabled or unarmed means RUN must be false.
+        if not self.enabled:
+            run = False
 
-        if not self.enabled or not self.armed:
+        if not self.armed:
             run = False
 
         return {
@@ -582,7 +652,7 @@ class VFDNode(Node):
         }
 
     # ------------------------------------------------------------------
-    # Apply node command
+    # APPLY COMMAND
     # ------------------------------------------------------------------
 
     def apply_command(self):
@@ -592,50 +662,30 @@ class VFDNode(Node):
         command = self.get_command()
 
         if not manager.is_connected():
-            self.status_text = "Disconnected"
-            return False
-
-        # RESET is not implemented in the current HY driver.
-        if command["reset"]:
             self.status_text = (
-                "RESET is not implemented for HY01D523B"
+                "Disconnected"
             )
             return False
 
-        # Set frequency first.
-
-        if not manager.set_frequency(
-            command["frequency"]
-        ):
-            self.update_status()
+        if command["reset"]:
+            self.status_text = (
+                "RESET is not implemented "
+                "for HY01D523B"
+            )
             return False
 
-        # Then run/stop.
-
-        if command["run"]:
-            if not manager.start():
-                self.update_status()
-                return False
-        else:
-            if not manager.stop():
-                self.update_status()
-                return False
-
-        # Direction is part of the RUN command.
-
-        if command["run"]:
-            if not manager.set_direction(
-                command["reverse"]
-            ):
-                self.update_status()
-                return False
+        result = manager.apply_command(
+            run=command["run"],
+            reverse=command["reverse"],
+            frequency_hz=command["frequency"],
+        )
 
         self.update_status()
 
-        return True
+        return bool(result)
 
     # ------------------------------------------------------------------
-    # Status
+    # STATUS
     # ------------------------------------------------------------------
 
     def update_status(self):
@@ -643,12 +693,25 @@ class VFDNode(Node):
 
         status = manager.update_status()
 
-        self.connected = bool(status.connected)
-        self.running = bool(status.running)
-        self.reverse = bool(status.reverse)
+        self.connected = bool(
+            status.connected
+        )
 
-        self.fault = bool(status.fault)
-        self.fault_code = int(status.fault_code)
+        self.running = bool(
+            status.running
+        )
+
+        self.reverse = bool(
+            status.reverse
+        )
+
+        self.fault = bool(
+            status.fault
+        )
+
+        self.fault_code = int(
+            status.fault_code
+        )
 
         self.actual_frequency = float(
             status.frequency_hz
@@ -657,9 +720,6 @@ class VFDNode(Node):
         self.actual_rpm = float(
             status.rpm
         )
-
-        # These values are intentionally zero until a real
-        # HY01D523B measurement/status protocol is implemented.
 
         self.actual_current = float(
             status.current_a
@@ -673,12 +733,24 @@ class VFDNode(Node):
             status.power_kw
         )
 
-        self.status_text = str(
-            status.fault_text
-            or status.state.value
-        )
-
-        # Update outputs.
+        if status.fault_text:
+            self.status_text = (
+                str(status.fault_text)
+            )
+        elif status.running:
+            self.status_text = (
+                "Running "
+                "(locally tracked)"
+            )
+        elif status.connected:
+            self.status_text = (
+                "Ready "
+                "(locally tracked)"
+            )
+        else:
+            self.status_text = (
+                "Disconnected"
+            )
 
         self._set_output(
             "Frequency",
@@ -727,7 +799,11 @@ class VFDNode(Node):
 
         return status
 
-    def _set_output(self, name, value):
+    def _set_output(
+        self,
+        name,
+        value,
+    ):
         socket = self.outputs.get(name)
 
         if socket is None:
@@ -739,10 +815,13 @@ class VFDNode(Node):
             pass
 
     # ------------------------------------------------------------------
-    # Frequency / RPM conversion
+    # FREQUENCY / RPM
     # ------------------------------------------------------------------
 
-    def frequency_to_rpm(self, frequency):
+    def frequency_to_rpm(
+        self,
+        frequency,
+    ):
         if self.motor_frequency <= 0.0:
             return 0.0
 
@@ -752,7 +831,10 @@ class VFDNode(Node):
             * self.motor_rpm
         )
 
-    def rpm_to_frequency(self, rpm):
+    def rpm_to_frequency(
+        self,
+        rpm,
+    ):
         if self.motor_rpm <= 0.0:
             return 0.0
 
@@ -763,10 +845,13 @@ class VFDNode(Node):
         )
 
     # ------------------------------------------------------------------
-    # Console
+    # CONSOLE
     # ------------------------------------------------------------------
 
-    def execute_command(self, command):
+    def execute_command(
+        self,
+        command,
+    ):
         manager = self.get_manager()
 
         text = command.strip()
@@ -775,7 +860,6 @@ class VFDNode(Node):
             return "ERROR: Empty command."
 
         parts = text.split()
-
         operation = parts[0].lower()
 
         # --------------------------------------------------------------
@@ -796,7 +880,6 @@ class VFDNode(Node):
 
         if operation == "disconnect":
             self.disconnect_vfd()
-
             return "OK: Disconnected"
 
         # --------------------------------------------------------------
@@ -812,153 +895,217 @@ class VFDNode(Node):
                 f"Reverse: {self.reverse}\n"
                 f"Frequency: "
                 f"{self.actual_frequency:.2f} Hz\n"
-                f"RPM: "
+                f"Estimated RPM: "
                 f"{self.actual_rpm:.0f}\n"
                 f"Fault: {self.fault}\n"
-                f"Fault code: {self.fault_code}\n"
-                f"Status: {self.status_text}"
+                f"Fault code: "
+                f"{self.fault_code}\n"
+                f"Status: "
+                f"{self.status_text}"
             )
 
         # --------------------------------------------------------------
         # GET / READ PDxxx
         # --------------------------------------------------------------
 
-        if operation in {"get", "read"}:
+        if operation in {
+            "get",
+            "read",
+        }:
             if len(parts) != 2:
-                return "ERROR: Use: get PD163"
+                return (
+                    "ERROR: Use: get PD163"
+                )
 
-            parameter_text = parts[1].upper()
+            parameter_text = (
+                parts[1].upper()
+            )
 
-            if parameter_text.startswith("PD"):
-                parameter_text = parameter_text[2:]
+            if parameter_text.startswith(
+                "PD"
+            ):
+                parameter_text = (
+                    parameter_text[2:]
+                )
 
             try:
-                parameter = int(parameter_text)
+                parameter = int(
+                    parameter_text
+                )
             except ValueError:
                 return (
                     "ERROR: Invalid parameter. "
                     "Use PD000-PD182."
                 )
 
-            if parameter < 0 or parameter > 182:
+            if not 0 <= parameter <= 182:
                 return (
                     "ERROR: Parameter must be "
                     "PD000-PD182."
                 )
 
             if not manager.is_connected():
-                return "ERROR: VFD is disconnected."
+                return (
+                    "ERROR: VFD is disconnected."
+                )
 
-            value = manager.read_parameter(parameter)
+            value = manager.read_parameter(
+                parameter
+            )
 
             if value is None:
                 return (
-                    f"ERROR: {manager.last_error()}"
+                    f"ERROR: "
+                    f"{manager.last_error()}"
                 )
 
-            result = (
-                f"OK: PD{parameter:03d} = {value}"
+            return (
+                f"OK: PD{parameter:03d} "
+                f"= {value}"
             )
-
-            return result
 
         # --------------------------------------------------------------
         # SET / WRITE PDxxx value
         # --------------------------------------------------------------
 
-        if operation in {"set", "write"}:
+        if operation in {
+            "set",
+            "write",
+        }:
             if len(parts) != 3:
-                return "ERROR: Use: set PD163 4"
+                return (
+                    "ERROR: Use: "
+                    "set PD163 4"
+                )
 
-            parameter_text = parts[1].upper()
+            parameter_text = (
+                parts[1].upper()
+            )
 
-            if parameter_text.startswith("PD"):
-                parameter_text = parameter_text[2:]
+            if parameter_text.startswith(
+                "PD"
+            ):
+                parameter_text = (
+                    parameter_text[2:]
+                )
 
             try:
-                parameter = int(parameter_text)
+                parameter = int(
+                    parameter_text
+                )
                 value = int(parts[2])
             except ValueError:
                 return (
-                    "ERROR: Invalid parameter or value."
+                    "ERROR: Invalid parameter "
+                    "or value."
                 )
 
-            if parameter < 0 or parameter > 182:
+            if not 0 <= parameter <= 182:
                 return (
                     "ERROR: Parameter must be "
                     "PD000-PD182."
                 )
 
-            if value < 0 or value > 65535:
+            if not 0 <= value <= 65535:
                 return (
-                    "ERROR: Value must be 0-65535."
+                    "ERROR: Value must be "
+                    "0-65535."
                 )
 
             if not manager.is_connected():
-                return "ERROR: VFD is disconnected."
+                return (
+                    "ERROR: VFD is disconnected."
+                )
 
             if not manager.write_parameter(
                 parameter,
                 value,
             ):
                 return (
-                    f"ERROR: {manager.last_error()}"
+                    f"ERROR: "
+                    f"{manager.last_error()}"
                 )
 
             return (
-                f"OK: PD{parameter:03d} = {value}"
+                f"OK: PD{parameter:03d} "
+                f"= {value}"
             )
 
         # --------------------------------------------------------------
         # START / RUN
         # --------------------------------------------------------------
 
-        if operation in {"start", "run"}:
+        if operation in {
+            "start",
+            "run",
+        }:
             if not self.enabled:
-                return "ERROR: VFD is disabled."
+                return (
+                    "ERROR: VFD is disabled."
+                )
 
             if not self.armed:
-                return "ERROR: VFD is not armed."
+                return (
+                    "ERROR: VFD is not armed."
+                )
 
             if not manager.is_connected():
-                return "ERROR: VFD is disconnected."
+                return (
+                    "ERROR: VFD is disconnected."
+                )
 
             if manager.start():
                 self.update_status()
                 return "OK: Started"
 
             return (
-                f"ERROR: {manager.last_error()}"
+                f"ERROR: "
+                f"{manager.last_error()}"
             )
 
         # --------------------------------------------------------------
         # STOP / HALT
         # --------------------------------------------------------------
 
-        if operation in {"stop", "halt"}:
+        if operation in {
+            "stop",
+            "halt",
+        }:
             if not manager.is_connected():
-                return "ERROR: VFD is disconnected."
+                return (
+                    "ERROR: VFD is disconnected."
+                )
 
             if manager.stop():
                 self.update_status()
                 return "OK: Stopped"
 
             return (
-                f"ERROR: {manager.last_error()}"
+                f"ERROR: "
+                f"{manager.last_error()}"
             )
 
         # --------------------------------------------------------------
         # FREQUENCY
         # --------------------------------------------------------------
 
-        if operation in {"freq", "frequency"}:
+        if operation in {
+            "freq",
+            "frequency",
+        }:
             if len(parts) != 2:
-                return "ERROR: Use: freq 200"
+                return (
+                    "ERROR: Use: freq 200"
+                )
 
             try:
-                frequency = float(parts[1])
+                frequency = float(
+                    parts[1]
+                )
             except ValueError:
-                return "ERROR: Invalid frequency."
+                return (
+                    "ERROR: Invalid frequency."
+                )
 
             if manager.set_frequency(
                 frequency
@@ -966,56 +1113,81 @@ class VFDNode(Node):
                 self.update_status()
 
                 return (
-                    f"OK: Frequency = "
-                    f"{frequency:.2f} Hz"
+                    "OK: Frequency = "
+                    f"{manager.target_frequency_hz:.2f} Hz"
                 )
 
             return (
-                f"ERROR: {manager.last_error()}"
+                f"ERROR: "
+                f"{manager.last_error()}"
             )
 
         # --------------------------------------------------------------
         # FORWARD
         # --------------------------------------------------------------
 
-        if operation in {"forward", "fwd"}:
+        if operation in {
+            "forward",
+            "fwd",
+        }:
             if not self.enabled:
-                return "ERROR: VFD is disabled."
+                return (
+                    "ERROR: VFD is disabled."
+                )
 
             if not self.armed:
-                return "ERROR: VFD is not armed."
+                return (
+                    "ERROR: VFD is not armed."
+                )
 
             if not manager.is_connected():
-                return "ERROR: VFD is disconnected."
+                return (
+                    "ERROR: VFD is disconnected."
+                )
 
-            if manager.set_direction(False):
+            if manager.set_direction(
+                False
+            ):
                 self.update_status()
                 return "OK: Forward"
 
             return (
-                f"ERROR: {manager.last_error()}"
+                f"ERROR: "
+                f"{manager.last_error()}"
             )
 
         # --------------------------------------------------------------
         # REVERSE
         # --------------------------------------------------------------
 
-        if operation in {"reverse", "rev"}:
+        if operation in {
+            "reverse",
+            "rev",
+        }:
             if not self.enabled:
-                return "ERROR: VFD is disabled."
+                return (
+                    "ERROR: VFD is disabled."
+                )
 
             if not self.armed:
-                return "ERROR: VFD is not armed."
+                return (
+                    "ERROR: VFD is not armed."
+                )
 
             if not manager.is_connected():
-                return "ERROR: VFD is disconnected."
+                return (
+                    "ERROR: VFD is disconnected."
+                )
 
-            if manager.set_direction(True):
+            if manager.set_direction(
+                True
+            ):
                 self.update_status()
                 return "OK: Reverse"
 
             return (
-                f"ERROR: {manager.last_error()}"
+                f"ERROR: "
+                f"{manager.last_error()}"
             )
 
         # --------------------------------------------------------------
@@ -1047,6 +1219,8 @@ class VFDNode(Node):
 
             manager.set_enabled(False)
 
+            self.update_status()
+
             return "OK: Disabled"
 
         # --------------------------------------------------------------
@@ -1063,10 +1237,15 @@ class VFDNode(Node):
         # DISARM
         # --------------------------------------------------------------
 
-        if operation in {"disarm", "unarm"}:
+        if operation in {
+            "disarm",
+            "unarm",
+        }:
             self.armed = False
 
             manager.set_armed(False)
+
+            self.update_status()
 
             return "OK: Disarmed"
 
@@ -1104,22 +1283,44 @@ class VFDNode(Node):
         )
 
     # ------------------------------------------------------------------
-    # Blender UI
+    # BLENDER UI
     # ------------------------------------------------------------------
 
-    def draw_buttons(self, context, layout):
+    def draw_buttons(
+        self,
+        context,
+        layout,
+    ):
         # Connection
 
         box = layout.box()
+        box.label(
+            text="Connection"
+        )
 
-        box.label(text="Connection")
+        box.prop(
+            self,
+            "device_name",
+        )
 
-        box.prop(self, "device_name")
-        box.prop(self, "serial_port")
-        box.prop(self, "slave_id")
-        box.prop(self, "baudrate")
+        box.prop(
+            self,
+            "serial_port",
+        )
 
-        row = box.row(align=True)
+        box.prop(
+            self,
+            "slave_id",
+        )
+
+        box.prop(
+            self,
+            "baudrate",
+        )
+
+        row = box.row(
+            align=True
+        )
 
         connect = row.operator(
             "vfd.connect",
@@ -1137,16 +1338,65 @@ class VFDNode(Node):
 
         box = layout.box()
 
-        box.label(text="Control")
+        box.label(
+            text="Control"
+        )
 
-        box.prop(self, "enabled")
-        box.prop(self, "armed")
+        box.prop(
+            self,
+            "enabled",
+        )
+
+        box.prop(
+            self,
+            "armed",
+        )
+
+        # Motor
+
+        box = layout.box()
+
+        box.label(
+            text="Motor"
+        )
+
+        box.prop(
+            self,
+            "motor_power_kw",
+        )
+
+        box.prop(
+            self,
+            "motor_voltage",
+        )
+
+        box.prop(
+            self,
+            "motor_frequency",
+        )
+
+        box.prop(
+            self,
+            "motor_rpm",
+        )
+
+        box.prop(
+            self,
+            "minimum_frequency",
+        )
+
+        box.prop(
+            self,
+            "maximum_frequency",
+        )
 
         # Command
 
         box = layout.box()
 
-        box.label(text="Command")
+        box.label(
+            text="Command"
+        )
 
         box.prop(
             self,
@@ -1170,52 +1420,71 @@ class VFDNode(Node):
 
         row = box.row()
 
-        row.operator(
+        operator = row.operator(
             "vfd.execute",
             text="Apply Command",
-        ).node_name = self.name
+        )
+
+        operator.node_name = self.name
+        operator.command = ""
 
         # Status
 
         box = layout.box()
 
-        box.label(text="Status")
-
         box.label(
-            text=f"Connection: "
-            f"{'Connected' if self.connected else 'Disconnected'}"
+            text="Status"
         )
 
         box.label(
-            text=f"Running: "
-            f"{'YES' if self.running else 'NO'}"
+            text=(
+                "Connection: "
+                f"{'Connected' if self.connected else 'Disconnected'}"
+            )
         )
 
         box.label(
-            text=f"Direction: "
-            f"{'Reverse' if self.reverse else 'Forward'}"
+            text=(
+                "Running: "
+                f"{'YES' if self.running else 'NO'}"
+            )
         )
 
         box.label(
-            text=f"Frequency: "
-            f"{self.actual_frequency:.2f} Hz"
+            text=(
+                "Direction: "
+                f"{'Reverse' if self.reverse else 'Forward'}"
+            )
         )
 
         box.label(
-            text=f"RPM: "
-            f"{self.actual_rpm:.0f}"
+            text=(
+                f"Frequency: "
+                f"{self.actual_frequency:.2f} Hz"
+            )
         )
 
         box.label(
-            text=f"Status: "
-            f"{self.status_text}"
+            text=(
+                f"Estimated RPM: "
+                f"{self.actual_rpm:.0f}"
+            )
+        )
+
+        box.label(
+            text=(
+                f"Status: "
+                f"{self.status_text}"
+            )
         )
 
         # Console
 
         box = layout.box()
 
-        box.label(text="Console")
+        box.label(
+            text="Console"
+        )
 
         box.prop(
             self,
@@ -1232,26 +1501,23 @@ class VFDNode(Node):
         operator.command = self.console_command
 
         box.label(
-            text=self.console_output,
+            text=self.console_output
         )
 
     # ------------------------------------------------------------------
-    # Blender node update
+    # NODE UPDATE
     # ------------------------------------------------------------------
 
     def update(self):
         """
-        Called by Blender when node properties change.
-
-        We deliberately do not send commands automatically here.
-        Communication with the VFD should happen explicitly through
-        Apply Command or the console.
+        Configuration changes do not automatically transmit commands.
+        The user must explicitly Apply Command or use the console.
         """
         pass
 
 
 # ----------------------------------------------------------------------
-# Registration
+# REGISTRATION
 # ----------------------------------------------------------------------
 
 classes = (
@@ -1265,12 +1531,6 @@ classes = (
 def register():
     for cls in classes:
         bpy.utils.register_class(cls)
-
-    if not hasattr(
-        bpy.types,
-        "VFDNodeTree",
-    ):
-        pass
 
 
 def unregister():
