@@ -1,4 +1,4 @@
-```python
+
 from __future__ import annotations
 
 import bpy
@@ -1279,4 +1279,3 @@ def unregister():
             bpy.utils.unregister_class(cls)
         except RuntimeError:
             pass
-```
