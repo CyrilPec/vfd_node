@@ -1,4 +1,3 @@
-```python
 bl_info = {
     "name": "VFD Node",
     "author": "CyrilPec",
@@ -18,4 +17,4 @@ def unregister():
 
 if __name__ == "__main__":
     register()
-```
+
