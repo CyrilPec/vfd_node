@@ -1,49 +1,232 @@
-PROJECT: CyrilPec/vfd_node
-TASK: Blender VFD Node for direct HY01D523B VFD control.
+Project
 
-CURRENT REPO:
-https://github.com/CyrilPec/vfd_node
+GitHub repository:
 
-ARCHITECTURE:
-Blender VFD Node / Console
-        ↓
-    VFDManager
-        ↓
-   HY01D523B
-        ↓
-      RS-485
-        ↓
-   HY01D523B VFD
+CyrilPec/vfd_node
 
-Files:
-- __init__.py
-- hy01d523b_vfd.py
-- vfd_manager.py
-- vfd_node.py
-- vfd_architecture.txt
+Main branch:
 
-Architecture rules:
-- hy01d523b_vfd.py = actual HY01D523B protocol implementation.
-- vfd_manager.py = high-level control/state/configuration.
-- vfd_node.py = Blender node properties, UI, buttons, console parser.
-- __init__.py = Blender addon metadata + registration only.
-- Do NOT introduce generic VFDDriver / adapter / driver_manager layers.
-- Old files driver_manager.py, huanyang_vfd.py, ModBus_vfd.py were removed.
-- User prefers compact code with NO EMPTY LINES.
-- User prefers dense code / less scrolling.
+main
 
-Priority fix:
-Remove Markdown fences from vfd_node.py.
-Remove Markdown fences from vfd_manager.py.
-Fix __init__.py so it imports classes that actually exist.
-Fix the serial transport mismatch.
-Add unit tests for the CRC and every known HY01D523B frame.
-Add response/CRC validation.
-Implement real VFD status polling.
-Stop relying on locally simulated running/fault.
-Make disable/disarm actually stop the VFD.
-Simplify RUN/direction sequencing.
-Make frequency validation consistent.
-Rename estimated RPM to commanded/estimated RPM.
-Add a communication watchdog/timeouts.
-Add tests using a fake serial transport before connecting real hardware.
+Project purpose: Blender VFD node for controlling a Huanyang HY01D523B VFD (HY01D523B) over RS-485.
+
+Previous review
+
+The code was reviewed for correctness. Main findings:
+
+vfd_node.py contained accidental Markdown code fences (```python and ```), making it invalid Python.
+vfd_manager.py had the same Markdown-fence problem.
+The manager passed a string such as "COM3" to HY01D523B, while the driver expects a serial transport object.
+Commands were locally marked successful without proper VFD response validation.
+running, reverse, and fault were mostly locally simulated rather than being confirmed hardware status.
+Disable/disarm should stop the VFD rather than merely changing software state.
+emergency_stop() is currently only a normal software STOP and must not be described as a safety-rated emergency stop.
+RUN/direction sequencing was redundant.
+Frequency limits should be validated consistently instead of silently clamping values.
+RPM is estimated from frequency and motor ratings, not measured spindle RPM.
+Parameter read/write handling needs stronger response/CRC validation.
+
+The low-level HY01D523B command construction appeared broadly consistent with published protocol examples, including frequency scaling of Hz × 100.
+
+Code supplied in previous chat
+
+Replacement files were supplied for:
+
+__init__.py
+vfd_manager.py
+hy01d523b_vfd.py
+vfd_node.py
+
+The revised architecture is:
+
+Blender VFD Node
+       |
+       v
+VFDManager
+       |
+       v
+HY01D523B driver
+       |
+       v
+pyserial RS-485 transport
+       |
+       v
+HY01D523B VFD
+
+
+The revised manager creates the serial transport approximately as:
+
+serial.Serial(
+    port=self.serial_port,
+    baudrate=self.baudrate,
+    bytesize=serial.EIGHTBITS,
+    parity=serial.PARITY_NONE,
+    stopbits=serial.STOPBITS_ONE,
+    timeout=self.timeout,
+    write_timeout=self.timeout,
+)
+
+
+and injects that transport into HY01D523B.
+
+Default communication settings:
+
+Port: COM3
+Slave ID: 4
+Baud: 9600
+8N1
+Timeout: 0.25 s
+
+pyserial is required.
+
+Install:
+
+pip install pyserial
+
+Safety behavior in revised code
+
+RUN requires:
+
+VFD connected
++
+Enabled
++
+ARMED
+
+
+Changing frequency only requires:
+
+VFD connected
++
+Enabled
+
+
+Disabling or disarming while connected attempts to issue STOP.
+
+Important: software STOP is not a safety-rated emergency stop. Hardware safety circuitry/STO should be used where required.
+
+Console commands in revised code
+
+Supported commands:
+
+connect
+disconnect
+status
+start
+run
+stop
+halt
+forward
+reverse
+freq 200
+get PD163
+read PD163
+set PD163 4
+write PD163 4
+enable
+disable
+arm
+disarm
+help
+
+Important limitation
+
+The revised driver still uses locally tracked state for:
+
+running
+reverse
+frequency
+fault
+
+
+It does NOT yet have a confirmed implementation of the actual HY01D523B status registers.
+
+Therefore:
+
+Running means locally tracked command state.
+Estimated RPM is calculated from frequency.
+Fault=False does not prove the physical VFD has no fault.
+Actual spindle RPM/current/voltage/power are not currently measured.
+
+Do NOT invent status-register behavior without confirming the exact HY01D523B protocol/firmware.
+
+Next recommended task
+
+Create a fake serial-port test suite before connecting a real spindle.
+
+Test exact transmitted frames for:
+
+Forward
+Reverse
+Stop
+Run
+Frequency 10 Hz
+Frequency 50 Hz
+Frequency 400 Hz
+Read PD163
+Write PD163
+CRC
+
+
+The fake serial transport should emulate the interface expected by HY01D523B:
+
+open()
+close()
+is_open
+write()
+read()
+in_waiting
+reset_input_buffer()
+flush()
+
+
+Tests should verify:
+
+Exact bytes sent.
+CRC correctness.
+Slave ID handling.
+Frequency conversion (Hz × 100).
+Parameter encoding.
+Invalid frequency rejection.
+Invalid parameter rejection.
+Connection failure handling.
+Partial serial writes.
+Malformed response handling.
+Bad CRC handling.
+Wrong slave ID handling.
+
+After the fake-serial tests pass, test communication with the real VFD at low/safe frequency with the spindle mechanically safe.
+
+Important UI detail
+
+The supplied vfd_node.py uses the existing vfd.execute operator for the Apply Command button. The button command should be:
+
+operator.command = "__APPLY__"
+
+
+and execute_command() needs to recognize:
+
+if operation == "__apply__":
+    if self.apply_command():
+        return "OK: Command applied"
+
+    return f"ERROR: {manager.last_error()}"
+
+
+This was identified as a small follow-up correction.
+
+Goal
+
+Eventually produce a robust Blender VFD node with:
+
+reliable RS-485 communication
+verified command responses
+real VFD status polling
+proper fault detection
+safe ARM/ENABLE behavior
+frequency/RPM control
+parameter read/write
+communication watchdog
+fake-serial automated tests
+clear distinction between commanded and measured values
+no unsafe assumptions about the VFD protocol
