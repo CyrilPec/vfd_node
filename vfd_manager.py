@@ -1,4 +1,3 @@
-```python
 from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
@@ -324,4 +323,3 @@ class VFDManager:
         if rated_frequency <= 0:
             return 0.0
         return float(frequency_hz) / rated_frequency * rated_rpm
-```
