@@ -32,7 +32,18 @@ Architecture rules:
 - User prefers compact code with NO EMPTY LINES.
 - User prefers dense code / less scrolling.
 
-LATEST COMMIT:
-a81ac12a454e832a2b9a65d82eafaefddde8a7f9
-Message: Update __init__.py
-https://github.com/CyrilPec/vfd_node/commit/a81ac12a454e832a2b9a65d82eafaefddde8a7f9
+Priority fix:
+Remove Markdown fences from vfd_node.py.
+Remove Markdown fences from vfd_manager.py.
+Fix __init__.py so it imports classes that actually exist.
+Fix the serial transport mismatch.
+Add unit tests for the CRC and every known HY01D523B frame.
+Add response/CRC validation.
+Implement real VFD status polling.
+Stop relying on locally simulated running/fault.
+Make disable/disarm actually stop the VFD.
+Simplify RUN/direction sequencing.
+Make frequency validation consistent.
+Rename estimated RPM to commanded/estimated RPM.
+Add a communication watchdog/timeouts.
+Add tests using a fake serial transport before connecting real hardware.
