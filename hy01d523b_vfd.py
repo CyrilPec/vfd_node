@@ -101,4 +101,73 @@ class HY01D523B:
     def _parse_status(self, response: bytes) -> dict:
         # Decode actual VFD response here.
         raise NotImplementedError
+ import time
+
+from vfd_status import VFDState
+
+
+class SpindleController:
+
+    STOP_CONFIRM_SAMPLES = 6
+    STOP_FREQUENCY_THRESHOLD = 0.5
+
+    def __init__(self, driver):
+        self.driver = driver
+
+        self.state = VFDState.IDLE
+
+        self.stop_samples = 0
+
+        self.commanded_running = False
+        self.commanded_reverse = False
+        self.commanded_frequency_hz = 0.0
+
+        self.actual_frequency_hz = 0.0
+        self.actual_rpm = 0.0
+
+    def start_forward(self):
+        self.driver.forward()
+
+        self.commanded_running = True
+        self.commanded_reverse = False
+        self.state = VFDState.STARTING
+
+    def start_reverse(self):
+        self.driver.reverse()
+
+        self.commanded_running = True
+        self.commanded_reverse = True
+        self.state = VFDState.STARTING
+
+    def stop(self):
+        self.driver.stop()
+
+        self.commanded_running = False
+        self.stop_samples = 0
+        self.state = VFDState.STOPPING
+
+    def update_status(self, status):
+        self.actual_frequency_hz = status["frequency_hz"]
+        self.actual_rpm = status["rpm"]
+
+        if self.state == VFDState.STOPPING:
+
+            if (
+                abs(self.actual_frequency_hz)
+                <= self.STOP_FREQUENCY_THRESHOLD
+            ):
+                self.stop_samples += 1
+            else:
+                self.stop_samples = 0
+
+            if self.stop_samples >= self.STOP_CONFIRM_SAMPLES:
+                self.state = VFDState.IDLE
+                self.stop_samples = 0
+
+        elif self.commanded_running:
+
+            if self.actual_frequency_hz > 0.5:
+                self.state = VFDState.RUNNING
+            else:
+                self.state = VFDState.STARTING
 
