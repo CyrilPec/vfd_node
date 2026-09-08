@@ -527,68 +527,57 @@ class VFDManager:
     # STATUS
     # ------------------------------------------------------------------
 
-    def update_status(self):
-        if not self.is_connected():
-            self.status.connected = False
-            self.status.running = False
-            self.status.state = VFDState.DISCONNECTED
+        def update_status(self):
+        if not self.vfd.is_connected():
+            self.status=VFDStatus(
+                connected=False,
+                state=VFDState.DISCONNECTED,
+                running=False,
+                reverse=False,
+                frequency_hz=0.0,
+                rpm=0,
+                current_a=0.0,
+                voltage_v=0.0,
+                power_kw=0.0,
+                dc_voltage_v=0.0,
+                fault=False,
+                fault_code=0,
+                fault_text="",
+                raw={}
+            )
             return self.status
-
         try:
-            raw = self.vfd.get_local_status()
-
-            self.status.connected = bool(
-                raw.get("connected", True)
-            )
-
-            self.status.running = bool(
-                raw.get("running", False)
-            )
-
-            self.status.reverse = bool(
-                raw.get("reverse", False)
-            )
-
-            self.status.frequency_hz = float(
-                raw.get(
-                    "frequency",
-                    self.target_frequency_hz,
-                )
-            )
-
-            self.status.rpm = self._frequency_to_rpm(
-                self.status.frequency_hz
-            )
-
-            self.status.fault = bool(
-                raw.get("fault", False)
-            )
-
-            self.status.fault_code = int(
-                raw.get("fault_code", 0)
-            )
-
-            self.status.fault_text = str(
-                raw.get("error", "")
-            )
-
-            self.status.raw = raw
-
-            if not self.status.connected:
-                self.status.state = VFDState.DISCONNECTED
-
-            elif self.status.fault:
-                self.status.state = VFDState.FAULT
-
-            elif self.status.running:
-                self.status.state = VFDState.RUNNING
-
+            data=self.vfd.read_control_status()
+            running=bool(data.get("running",False))
+            fault=bool(data.get("fault",False))
+            if fault:
+                state=VFDState.FAULT
+            elif running:
+                state=VFDState.RUNNING
             else:
-                self.status.state = VFDState.READY
-
+                state=VFDState.STOPPED
+            self.status=VFDStatus(
+                connected=True,
+                state=state,
+                running=running,
+                reverse=bool(data.get("reverse",False)),
+                frequency_hz=float(data.get("output_frequency",data.get("frequency",0.0))),
+                rpm=int(data.get("rpm",0)),
+                current_a=float(data.get("output_current",0.0)),
+                voltage_v=float(data.get("ac_voltage",0.0)),
+                power_kw=0.0,
+                dc_voltage_v=float(data.get("dc_voltage",0.0)),
+                fault=fault,
+                fault_code=int(data.get("fault_code",0)),
+                fault_text="",
+                raw=data
+            )
         except Exception as exc:
-            self._error(str(exc))
-
+            self.last_error=str(exc)
+            self.status.connected=self.vfd.is_connected()
+            self.status.fault=False
+            self.status.fault_code=0
+            self.status.fault_text=""
         return self.status
 
     def get_status(self):
