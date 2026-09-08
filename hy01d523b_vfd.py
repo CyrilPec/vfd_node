@@ -75,3 +75,30 @@ class HY01D523B:
         ])
 
         return self.protocol.transaction(payload)
+
+ class HY01D523B:
+    # ...
+
+    def read_status(self) -> dict:
+        """
+        Read actual VFD operating data.
+        """
+
+        # The register/frame details should be verified against
+        # the exact VFD firmware before hardware deployment.
+
+        response = self.protocol.transaction(
+            bytes([
+                self.protocol.slave_id,
+                0x03,
+                0x00,
+                0x00,
+            ])
+        )
+
+        return self._parse_status(response)
+
+    def _parse_status(self, response: bytes) -> dict:
+        # Decode actual VFD response here.
+        raise NotImplementedError
+
