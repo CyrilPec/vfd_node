@@ -267,6 +267,85 @@ class VFDNode(Node):
                 self.last_error=str(e)
                 self.console_line=f"VFD | ERROR | {e}"
                 return False
+                
+        def execute_pd_command(self):
+        command = self.command.strip()
+
+        if not command:
+            return False
+
+        if not self.connected:
+            self.answer = "ERROR: VFD is not connected"
+            self.console_line = self.answer
+            return False
+
+        try:
+            parts = command.split()
+
+            if len(parts) == 2 and parts[0].lower() in ("get", "read"):
+                parameter_text = parts[1].upper()
+
+                if not parameter_text.startswith("PD"):
+                    raise ValueError("Use PD000..PD181")
+
+                parameter = int(parameter_text[2:])
+
+                if not 0 <= parameter <= 181:
+                    raise ValueError("Parameter must be PD000..PD181")
+
+                with _LOCK:
+                    m = self.configure()
+
+                    if not m.is_connected():
+                        self.connected = False
+                        raise RuntimeError("VFD is disconnected")
+
+                    value = m.vfd.read_parameter(parameter)
+
+                self.answer = f"PD{parameter:03d} = {value}"
+                self.console_line = f"VFD | {self.answer}"
+                self.last_error = ""
+                return True
+
+            if len(parts) == 3 and parts[0].lower() in ("set", "write"):
+                parameter_text = parts[1].upper()
+
+                if not parameter_text.startswith("PD"):
+                    raise ValueError("Use PD000..PD181")
+
+                parameter = int(parameter_text[2:])
+                value = int(parts[2])
+
+                if not 0 <= parameter <= 181:
+                    raise ValueError("Parameter must be PD000..PD181")
+
+                if not 0 <= value <= 65535:
+                    raise ValueError("Value must be 0..65535")
+
+                with _LOCK:
+                    m = self.configure()
+
+                    if not m.is_connected():
+                        self.connected = False
+                        raise RuntimeError("VFD is disconnected")
+
+                    m.vfd.write_parameter(parameter, value)
+
+                self.answer = f"PD{parameter:03d} = {value}"
+                self.console_line = f"VFD | {self.answer}"
+                self.last_error = ""
+                return True
+
+            raise ValueError(
+                "Use: get PD000  or  set PD000 123"
+            )
+
+        except Exception as e:
+            self.last_error = str(e)
+            self.answer = f"ERROR: {e}"
+            self.console_line = f"VFD | ERROR | {e}"
+            return False
+
     def update_status(self):
         if not self.connected:
             self._outputs()
@@ -309,9 +388,11 @@ class VFDNode(Node):
         try:
             if self.connected:
                 self.apply_command()
+            self.execute_pd_command()
             self._outputs()
         except Exception:
             pass
+
     def draw_buttons(self,context,layout):
         layout.label(text="VFD Node")
       
