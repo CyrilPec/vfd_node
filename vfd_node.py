@@ -10,11 +10,7 @@ from bpy.props import (
     StringProperty,
 )
 
-try:
-    from .vfd_manager import VFDManager
-except ImportError:
-    from vfd_manager import VFDManager
-
+from .vfd_manager import VFDManager
 
 # ----------------------------------------------------------------------
 # MANAGER STORAGE
