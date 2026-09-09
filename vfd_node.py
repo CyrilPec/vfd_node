@@ -466,11 +466,7 @@ class VFDNode(Node):
             text=self.answer if self.answer else "—",
             icon="INFO"
         )
-        # PD answer
-        layout.label(text="Answer:")
-        row = layout.row(align=True)
-        row.label(text=self.answer)
-      
+              
         layout.separator()
       
         # Connection status
