@@ -311,33 +311,72 @@ class VFDNode(Node):
         except Exception:
             pass
     def draw_buttons(self,context,layout):
-        row=layout.row(align=True)
-        row.prop(self,"serial_port",text="Port")
-        row.prop(self,"slave_id",text="ID")
-        row=layout.row(align=True)
-        row.prop(self,"baudrate",text="Baud")
+        layout.label(text="VFD Node")
+      
+        # PD command
+        layout.label(text="Command:")
+        row = layout.row(align=True)
+        row.prop(self, "command", text="")
+      
+        # PD answer
+        layout.label(text="Answer:")
+        row = layout.row(align=True)
+        row.label(text=self.answer)
+      
+        layout.separator()
+      
+        # Connection status
+        layout.label(text=f"Status: {self.status}")
+      
+        row = layout.row(align=True)
+        row.prop(self, "serial_port", text="Port")
+        row.prop(self, "slave_id", text="ID")
+      
+        row = layout.row(align=True)
+        row.prop(self, "baudrate", text="Baud")
+      
         if self.connected:
-            op=row.operator("vfd.disconnect",text="Disconnect",icon="UNLINKED")
+            op = row.operator(
+                "vfd.disconnect",
+                text="Disconnect",
+                icon="UNLINKED"
+            )
         else:
-            op=row.operator("vfd.connect",text="Connect",icon="LINKED")
-        op.node_name=self.name
-        row=layout.row(align=True)
-        row.prop(self,"enabled",text="Enabled",toggle=True)
-        row.prop(self,"armed",text="ARM",toggle=True)
-        row=layout.row(align=True)
-        row.prop(self,"frequency_command",text="Hz")
-        row.prop(self,"rpm_command",text="RPM")
-        row=layout.row(align=True)
-        row.prop(self,"running_command",text="RUN",toggle=True)
-        row.prop(self,"reverse_command",text="REV",toggle=True)
-        op=row.operator("vfd.stop",text="STOP",icon="PAUSE")
-        op.node_name=self.name
-        row=layout.row(align=True)
-        row.prop(self,"motor_frequency",text="Rated Hz")
-        row.prop(self,"motor_rpm",text="Rated RPM")
-        row=layout.row(align=True)
+            op = row.operator(
+                "vfd.connect",
+                text="Connect",
+                icon="LINKED"
+            )
+      
+        op.node_name = self.name
+      
+        row = layout.row(align=True)
+        row.prop(self, "enabled", text="Enabled", toggle=True)
+        row.prop(self, "armed", text="ARM", toggle=True)
+      
+        row = layout.row(align=True)
+        row.prop(self, "frequency_command", text="Hz")
+        row.prop(self, "rpm_command", text="RPM")
+      
+        row = layout.row(align=True)
+        row.prop(self, "running_command", text="RUN", toggle=True)
+        row.prop(self, "reverse_command", text="REV", toggle=True)
+      
+        op = row.operator(
+            "vfd.stop",
+            text="STOP",
+            icon="PAUSE"
+        )
+        op.node_name = self.name
+      
+        row = layout.row(align=True)
+        row.prop(self, "motor_frequency", text="Rated Hz")
+        row.prop(self, "motor_rpm", text="Rated RPM")
+      
+        row = layout.row(align=True)
         row.prop(self,"minimum_frequency",text="Min")
         row.prop(self,"maximum_frequency",text="Max")
+        # VFD response / console line
         status=layout.row()
         status.alert=self.fault
         status.label(text=self.console_line,icon="ERROR" if self.fault else "INFO")
