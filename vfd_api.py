@@ -119,6 +119,30 @@ class VFDAPI:
     # ==================================================================
     # STATUS
     # ==================================================================
+    def _ensure_api(self):
+
+    key = _api_key(
+        self.port,
+        self.slave_id,
+    )
+
+    if getattr(self, "_last_api_key", None) == key:
+        return getattr(self, "_vfd_api", None)
+
+    # Release previous VFD, if this node changed configuration.
+    if getattr(self, "_vfd_api", None) is not None:
+        release_vfd_api(
+            *self._last_api_key
+        )
+
+    self._vfd_api = acquire_vfd_api(
+        self.port,
+        self.slave_id,
+    )
+
+    self._last_api_key = key
+
+    return self._vfd_api
 
     def get_status(self) -> VFDStatus:
         """
