@@ -527,7 +527,7 @@ class VFDManager:
     # STATUS
     # ------------------------------------------------------------------
 
-        def update_status(self):
+    def update_status(self):
         if not self.vfd.is_connected():
             self.status=VFDStatus(
                 connected=False,
