@@ -1,24 +1,31 @@
 from __future__ import annotations
 
 import bpy
-from bpy.types import Node
 
 from .vfd_api import VFDAPI
-from .vfd_manager import VFDStatus
+from .vfd_manager import VFDManager
+from .vfd_session import VFDSession
 
 
 # ----------------------------------------------------------------------
-# SHARED API REGISTRY
+# SHARED VFD REGISTRY
 # ----------------------------------------------------------------------
 
-# One VFDAPI per physical VFD configuration.
+# One physical session per:
 #
-# This prevents multiple nodes pointing at the same:
+#     (serial_port, slave_id)
 #
-#     port + slave_id
+# Multiple Blender nodes may use the same physical VFD.
 #
-# from opening multiple serial connections.
-_APIS: dict[tuple[str, int], VFDAPI] = {}
+# Example:
+#
+#     Node A ─┐
+#     Node B ─┼──> one VFDAPI ──> one VFDManager ──> one VFDSession
+#     Node C ─┘
+#
+# The session is destroyed only when the LAST node releases it.
+
+_VFD_REGISTRY = {}
 
 
 def _api_key(
@@ -26,9 +33,24 @@ def _api_key(
     slave_id: int,
 ) -> tuple[str, int]:
     return (
-        str(port),
+        str(port).strip(),
         int(slave_id),
     )
+
+
+class _VFDEntry:
+    """
+    Internal registry entry.
+
+    Not exposed to Blender.
+    """
+
+    def __init__(
+        self,
+        api: VFDAPI,
+    ):
+        self.api = api
+        self.users = 0
 
 
 def get_vfd_api(
@@ -41,15 +63,13 @@ def get_vfd_api(
         slave_id,
     )
 
-    api = _APIS.get(key)
+    entry = _VFD_REGISTRY.get(key)
 
-    if api is None:
-        from .vfd_session import VFDSession
-        from .vfd_manager import VFDManager
+    if entry is None:
 
         session = VFDSession(
-            port=port,
-            slave_id=slave_id,
+            port=key[0],
+            slave_id=key[1],
         )
 
         manager = VFDManager(
@@ -60,9 +80,51 @@ def get_vfd_api(
             manager=manager,
         )
 
-        _APIS[key] = api
+        entry = _VFDEntry(
+            api=api,
+        )
 
-    return api
+        _VFD_REGISTRY[key] = entry
+
+    return entry.api
+
+
+def acquire_vfd_api(
+    port: str,
+    slave_id: int,
+) -> VFDAPI:
+
+    key = _api_key(
+        port,
+        slave_id,
+    )
+
+    entry = _VFD_REGISTRY.get(key)
+
+    if entry is None:
+
+        session = VFDSession(
+            port=key[0],
+            slave_id=key[1],
+        )
+
+        manager = VFDManager(
+            session=session,
+        )
+
+        api = VFDAPI(
+            manager=manager,
+        )
+
+        entry = _VFDEntry(
+            api=api,
+        )
+
+        _VFD_REGISTRY[key] = entry
+
+    entry.users += 1
+
+    return entry.api
 
 
 def release_vfd_api(
@@ -75,23 +137,79 @@ def release_vfd_api(
         slave_id,
     )
 
-    api = _APIS.pop(
+    entry = _VFD_REGISTRY.get(key)
+
+    if entry is None:
+        return
+
+    # Never allow the counter to become negative.
+    if entry.users > 0:
+        entry.users -= 1
+
+    # Keep the shared connection alive while another node uses it.
+    if entry.users > 0:
+        return
+
+    # Last user is gone.
+    _VFD_REGISTRY.pop(
         key,
         None,
     )
 
-    if api is None:
-        return
-
     try:
-        api.stop()
+        entry.api.stop()
     except Exception:
         pass
 
     try:
-        api.disconnect()
+        entry.api.disconnect()
     except Exception:
         pass
+
+
+def get_vfd_user_count(
+    port: str,
+    slave_id: int,
+) -> int:
+
+    key = _api_key(
+        port,
+        slave_id,
+    )
+
+    entry = _VFD_REGISTRY.get(key)
+
+    if entry is None:
+        return 0
+
+    return entry.users
+
+
+def disconnect_all_vfds() -> None:
+    """
+    Disconnect every shared VFD.
+
+    Use this during Blender add-on unregister/shutdown.
+    """
+
+    entries = list(
+        _VFD_REGISTRY.values()
+    )
+
+    _VFD_REGISTRY.clear()
+
+    for entry in entries:
+
+        try:
+            entry.api.stop()
+        except Exception:
+            pass
+
+        try:
+            entry.api.disconnect()
+        except Exception:
+            pass
+
 
 
 # ----------------------------------------------------------------------
