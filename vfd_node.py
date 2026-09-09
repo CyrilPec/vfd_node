@@ -1,583 +1,794 @@
-bl_info={"name":"VFD Geometry Node","author":"CyrilPec / modified","version":(2,0,0),"blender":(3,6,0),"location":"Geometry Nodes > Add > VFD","description":"HY01D523B VFD controller for Blender Geometry Nodes","category":"Node"}
+from __future__ import annotations
+
 import bpy
-import threading
-from bpy.types import Node,Operator
-from bpy.props import BoolProperty,FloatProperty,IntProperty,StringProperty
-try:
-    from .vfd_manager import VFDManager
-except ImportError:
-    from vfd_manager import VFDManager
-_LOCK=threading.RLock()
-_MANAGERS={}
-_TIMER_RUNNING=False
-def manager_for(node):
-    key=as_pointer(node)
-    manager=_MANAGERS.get(key)
-    if manager is None:
-        manager=VFDManager()
-        _MANAGERS[key]=manager
-    return manager
-def as_pointer(node):
+
+from bpy.types import Node
+
+from .vfd_api import VFDAPI
+from .vfd_manager import VFDStatus
+
+
+# ----------------------------------------------------------------------
+# API / MANAGER REGISTRY
+# ----------------------------------------------------------------------
+
+# One API instance per physical VFD configuration.
+#
+# The important part is that nodes do NOT each open their own serial
+# connection.
+#
+# This registry will eventually be backed by a connection/session
+# manager.
+_APIS = {}
+
+
+def _api_key(port: str, slave_id: int) -> tuple:
+    return (
+        str(port),
+        int(slave_id),
+    )
+
+
+def get_vfd_api(
+    port: str,
+    slave_id: int,
+) -> VFDAPI:
+    key = _api_key(port, slave_id)
+
+    api = _APIS.get(key)
+
+    if api is None:
+        # Import here to avoid circular imports.
+        from .vfd_session import VFDSession
+        from .vfd_manager import VFDManager
+
+        session = VFDSession(
+            port=port,
+            slave_id=slave_id,
+        )
+
+        manager = VFDManager(
+            session=session,
+        )
+
+        api = VFDAPI(
+            manager=manager,
+        )
+
+        _APIS[key] = api
+
+    return api
+
+
+def release_vfd_api(
+    port: str,
+    slave_id: int,
+) -> None:
+    key = _api_key(port, slave_id)
+
+    api = _APIS.pop(key, None)
+
+    if api is None:
+        return
+
     try:
-        return node.as_pointer()
+        api.disconnect()
     except Exception:
-        return id(node)
-def remove_manager(node):
-    key=as_pointer(node)
-    manager=_MANAGERS.pop(key,None)
-    if manager:
-        try:
-            manager.stop()
-        except Exception:
-            pass
-        try:
-            manager.disconnect()
-        except Exception:
-            pass
-def find_node(name):
-    for tree in bpy.data.node_groups:
-        for node in tree.nodes:
-            if node.name==name:
-                return node
-    return None
-class VFD_OT_connect(Operator):
-    bl_idname="vfd.connect"
-    bl_label="Connect VFD"
-    node_name:StringProperty()
-    def execute(self,context):
-        node=find_node(self.node_name)
-        if node is None:
-            self.report({"ERROR"},"VFD node was not found.")
-            return {"CANCELLED"}
-        if node.connect_vfd():
-            self.report({"INFO"},"VFD connected.")
-            return {"FINISHED"}
-        self.report({"ERROR"},node.console_line)
-        return {"CANCELLED"}
-class VFD_OT_disconnect(Operator):
-    bl_idname="vfd.disconnect"
-    bl_label="Disconnect VFD"
-    node_name:StringProperty()
-    def execute(self,context):
-        node=find_node(self.node_name)
-        if node is None:
-            return {"CANCELLED"}
-        node.disconnect_vfd()
-        return {"FINISHED"}
-class VFD_OT_stop(Operator):
-    bl_idname="vfd.stop"
-    bl_label="Stop VFD"
-    node_name:StringProperty()
-    def execute(self,context):
-        node=find_node(self.node_name)
-        if node is None:
-            return {"CANCELLED"}
-        if node.stop_vfd():
-            self.report({"INFO"},"VFD stopped.")
-            return {"FINISHED"}
-        self.report({"ERROR"},node.console_line)
-        return {"CANCELLED"}
-class VFD_OT_reset(Operator):
-    bl_idname="vfd.reset"
-    bl_label="Reset VFD"
-    node_name:StringProperty()
-    def execute(self,context):
-        node=find_node(self.node_name)
-        if node is None:
-            return {"CANCELLED"}
-        node.reset_status()
-        return {"FINISHED"}
-class VFD_OT_execute(Operator):
-    bl_idname = "vfd.execute"
-    bl_label = "Execute VFD Command"
+        pass
 
-    node_name: StringProperty()
 
-    def execute(self, context):
-        node = find_node(self.node_name)
-
-        if node is None:
-            self.report({"ERROR"}, "VFD node was not found.")
-            return {"CANCELLED"}
-
-        if node.execute_pd_command():
-            self.report({"INFO"}, node.answer)
-            return {"FINISHED"}
-
-        self.report({"ERROR"}, node.answer)
-        return {"CANCELLED"}
+# ----------------------------------------------------------------------
+# BLENDER NODE
+# ----------------------------------------------------------------------
 
 class VFDNode(Node):
-    bl_idname="VFDNode"
-    bl_label="VFD"
-    bl_icon="DRIVER"
-    serial_port:StringProperty(name="Port",default="COM3")
-    slave_id:IntProperty(name="Slave ID",default=4,min=1,max=247)
-    baudrate:IntProperty(name="Baud",default=9600,min=1200,max=115200)
-    enabled:BoolProperty(name="Enabled",default=True)
-    armed:BoolProperty(name="ARM",default=False)
-    motor_power_kw:FloatProperty(name="Power",default=1.5,min=0)
-    motor_voltage:FloatProperty(name="Voltage",default=220,min=0)
-    motor_frequency:FloatProperty(name="Rated Hz",default=400,min=1)
-    motor_rpm:FloatProperty(name="Rated RPM",default=24000,min=1)
-    minimum_frequency:FloatProperty(name="Min Hz",default=0,min=0)
-    maximum_frequency:FloatProperty(name="Max Hz",default=400,min=0)
-    minimum_rpm:FloatProperty(name="Min RPM",default=0,min=0)
-    maximum_rpm:FloatProperty(name="Max RPM",default=24000,min=0)
-    frequency_command:FloatProperty(name="Frequency",default=0,min=0)
-    rpm_command:FloatProperty(name="RPM",default=0,min=0)
-    running_command:BoolProperty(name="RUN",default=False)
-    reverse_command:BoolProperty(name="REVERSE",default=False)
-    connected:BoolProperty(name="Connected",default=False)
-    running:BoolProperty(name="Running",default=False)
-    reverse:BoolProperty(name="Reverse",default=False)
-    fault:BoolProperty(name="Fault",default=False)
-    fault_code:IntProperty(name="Fault Code",default=0)
-    actual_frequency:FloatProperty(name="Frequency",default=0)
-    actual_rpm:FloatProperty(name="RPM",default=0)
-    actual_current:FloatProperty(name="Current",default=0)
-    actual_voltage:FloatProperty(name="Voltage",default=0)
-    console_line:StringProperty(name="Console",default="VFD | DISCONNECTED")
-    command:StringProperty(name="Command",default="")
-    answer:StringProperty(name="Answer",default="")
-    last_error:StringProperty(name="Error",default="")
-    @classmethod
-    def poll(cls,ntree):
-        return ntree.bl_idname=="GeometryNodeTree"
-    def init(self,context):
-        f=self.inputs.new("NodeSocketFloat","Frequency")
-        f.default_value=0.0
-        r=self.inputs.new("NodeSocketFloat","RPM")
-        r.default_value=0.0
-        run=self.inputs.new("NodeSocketBool","RUN")
-        run.default_value=False
-        rev=self.inputs.new("NodeSocketBool","REVERSE")
-        rev.default_value=False
-        self.outputs.new("NodeSocketFloat","Frequency")
-        self.outputs.new("NodeSocketFloat","RPM")
-        self.outputs.new("NodeSocketFloat","Current")
-        self.outputs.new("NodeSocketFloat","Voltage")
-        self.outputs.new("NodeSocketBool","Connected")
-        self.outputs.new("NodeSocketBool","Running")
-        self.outputs.new("NodeSocketBool","Reverse")
-        self.outputs.new("NodeSocketBool","Fault")
-        
-    def copy(self,node):
-        self.connected=False
-        self.armed=False
-        self.console_line="VFD | DISCONNECTED"
-        _MANAGERS.pop(as_pointer(self),None)
-    def free(self):
-        remove_manager(self)
-    def get_manager(self):
-        return manager_for(self)
-    def configure(self):
-        m=self.get_manager()
-        m.configure_connection(self.serial_port,self.slave_id,self.baudrate,0.25)
-        m.set_enabled(self.enabled)
-        m.set_armed(self.armed)
-        return m
-    def connect_vfd(self):
-        with _LOCK:
-            try:
-                m=self.configure()
-                ok=m.connect()
-                self.connected=bool(ok)
-                if ok:
-                    self.last_error=""
-                    self.console_line=f"VFD | CONNECTED | {self.serial_port}"
-                else:
-                    self.last_error=m.last_error()
-                    self.console_line=f"VFD | ERROR | {self.last_error or 'Connection failed'}"
-                return ok
-            except Exception as e:
-                self.connected=False
-                self.last_error=str(e)
-                self.console_line=f"VFD | ERROR | {e}"
-                return False
-    def disconnect_vfd(self):
-        with _LOCK:
-            try:
-                self.get_manager().disconnect()
-            except Exception:
-                pass
-        self.connected=False
-        self.running=False
-        self.console_line="VFD | DISCONNECTED"
-    def stop_vfd(self):
-        with _LOCK:
-            try:
-                ok=self.get_manager().stop()
-                self.running=False
-                self.console_line="VFD | STOPPED" if ok else f"VFD | ERROR | {self.get_manager().last_error()}"
-                return ok
-            except Exception as e:
-                self.console_line=f"VFD | ERROR | {e}"
-                return False
-    def reset_status(self):
-        self.last_error=""
-        self.fault=False
-        self.fault_code=0
-        if self.connected:
-            self.console_line="VFD | READY"
-        else:
-            self.console_line="VFD | DISCONNECTED"
-    def socket_float(self,name,default):
-        s=self.inputs.get(name)
-        if s is None:
-            return default
+    """
+    Blender-side adapter for a VFD.
+
+    IMPORTANT:
+
+        This class must not perform direct serial/Modbus I/O.
+
+    Blender:
+        Node -> API -> Manager -> Session -> Driver -> VFD
+    """
+
+    bl_idname = "VFDNodeType"
+    bl_label = "VFD"
+    bl_icon = "MOD_PHYSICS"
+
+    # ------------------------------------------------------------------
+    # PROPERTIES
+    # ------------------------------------------------------------------
+
+    port: bpy.props.StringProperty(
+        name="Port",
+        default="COM3",
+    )
+
+    slave_id: bpy.props.IntProperty(
+        name="Slave ID",
+        default=4,
+        min=1,
+        max=247,
+    )
+
+    connected: bpy.props.BoolProperty(
+        name="Connected",
+        default=False,
+    )
+
+    enabled: bpy.props.BoolProperty(
+        name="Enabled",
+        default=True,
+    )
+
+    armed: bpy.props.BoolProperty(
+        name="Armed",
+        default=False,
+    )
+
+    frequency_hz: bpy.props.FloatProperty(
+        name="Frequency",
+        default=0.0,
+        min=0.0,
+        max=400.0,
+        update=lambda self, context: self._command_changed(),
+    )
+
+    run: bpy.props.BoolProperty(
+        name="Run",
+        default=False,
+        update=lambda self, context: self._command_changed(),
+    )
+
+    reverse: bpy.props.BoolProperty(
+        name="Reverse",
+        default=False,
+        update=lambda self, context: self._command_changed(),
+    )
+
+    # ------------------------------------------------------------------
+    # CACHED OUTPUT VALUES
+    # ------------------------------------------------------------------
+
+    actual_frequency_hz: bpy.props.FloatProperty(
+        name="Actual Frequency",
+        default=0.0,
+    )
+
+    actual_rpm: bpy.props.FloatProperty(
+        name="Actual RPM",
+        default=0.0,
+    )
+
+    actual_running: bpy.props.BoolProperty(
+        name="Actual Running",
+        default=False,
+    )
+
+    actual_reverse: bpy.props.BoolProperty(
+        name="Actual Reverse",
+        default=False,
+    )
+
+    fault: bpy.props.BoolProperty(
+        name="Fault",
+        default=False,
+    )
+
+    fault_code: bpy.props.IntProperty(
+        name="Fault Code",
+        default=0,
+    )
+
+    error_message: bpy.props.StringProperty(
+        name="Error",
+        default="",
+    )
+
+    # ------------------------------------------------------------------
+    # INTERNAL STATE
+    # ------------------------------------------------------------------
+
+    _last_command = None
+    _last_api_key = None
+
+    # ------------------------------------------------------------------
+    # BLENDER NODE SETUP
+    # ------------------------------------------------------------------
+
+    def init(self, context):
+        self.width = 220
+
+        # Inputs
+        self.inputs.new(
+            "NodeSocketFloat",
+            "Frequency",
+        )
+
+        self.inputs.new(
+            "NodeSocketBool",
+            "Run",
+        )
+
+        self.inputs.new(
+            "NodeSocketBool",
+            "Reverse",
+        )
+
+        # Outputs
+        self.outputs.new(
+            "NodeSocketFloat",
+            "Frequency",
+        )
+
+        self.outputs.new(
+            "NodeSocketFloat",
+            "RPM",
+        )
+
+        self.outputs.new(
+            "NodeSocketBool",
+            "Running",
+        )
+
+        self.outputs.new(
+            "NodeSocketBool",
+            "Reverse",
+        )
+
+        self.outputs.new(
+            "NodeSocketBool",
+            "Fault",
+        )
+
+    # ------------------------------------------------------------------
+    # API
+    # ------------------------------------------------------------------
+
+    def _get_api(self) -> VFDAPI:
+        return get_vfd_api(
+            port=self.port,
+            slave_id=self.slave_id,
+        )
+
+    # ------------------------------------------------------------------
+    # CONNECTION
+    # ------------------------------------------------------------------
+
+    def connect_vfd(self) -> bool:
+        api = self._get_api()
+
         try:
-            if s.is_linked:
-                src=s.links[0].from_socket
-                if hasattr(src,"default_value"):
-                    return float(src.default_value)
-            return float(s.default_value)
-        except Exception:
-            return default
-    def socket_bool(self,name,default):
-        s=self.inputs.get(name)
-        if s is None:
-            return default
-        try:
-            if s.is_linked:
-                src=s.links[0].from_socket
-                if hasattr(src,"default_value"):
-                    return bool(src.default_value)
-            return bool(s.default_value)
-        except Exception:
-            return default
-    def calculate_command(self):
-        frequency=self.socket_float("Frequency",self.frequency_command)
-        rpm=self.socket_float("RPM",self.rpm_command)
-        rpm_socket=self.inputs.get("RPM")
-        if rpm_socket and rpm_socket.is_linked:
-            rated_rpm=max(self.motor_rpm,0.001)
-            frequency=(rpm/rated_rpm)*self.motor_frequency
-        frequency=max(self.minimum_frequency,min(frequency,self.maximum_frequency))
-        rpm=(frequency/max(self.motor_frequency,0.001))*self.motor_rpm
-        run=self.socket_bool("RUN",self.running_command)
-        reverse=self.socket_bool("REVERSE",self.reverse_command)
-        if not self.enabled or not self.armed:
-            run=False
-        return frequency,rpm,run,reverse
-    def apply_command(self):
+            result = api.connect()
+
+        except Exception as exc:
+            self.connected = False
+            self.error_message = str(exc)
+            return False
+
+        self.connected = bool(result)
+
         if not self.connected:
-            return False
-        frequency,rpm,run,reverse=self.calculate_command()
-        with _LOCK:
-            try:
-                m=self.configure()
-                if not m.is_connected():
-                    self.connected=False
-                    self.console_line="VFD | DISCONNECTED"
-                    return False
-                ok=m.apply_command(run,reverse,frequency)
-                if ok:
-                    self.actual_frequency=frequency
-                    self.actual_rpm=rpm
-                    self.running=run
-                    self.reverse=reverse
-                    self.console_line=f"VFD | {'RUN' if run else 'READY'} | {'REV' if reverse else 'FWD'} | {frequency:.1f} Hz | {rpm:.0f} RPM"
-                    self.last_error=""
-                else:
-                    self.last_error=m.last_error()
-                    self.console_line=f"VFD | ERROR | {self.last_error or 'Command failed'}"
-                return ok
-            except Exception as e:
-                self.last_error=str(e)
-                self.console_line=f"VFD | ERROR | {e}"
-                return False
-                
-    def execute_pd_command(self):
-        command = self.command.strip()
-      
-        if not command:
-            self.answer = ""
-            return False
-      
-        if not self.connected:
-            self.answer = "ERROR: VFD is not connected"
-            self.console_line = self.answer
-            return False
-      
-        try:
-            parts = command.split()
-      
-            # --------------------------------------------------
-            # GET / READ
-            # get PD000
-            # read PD181
-            # --------------------------------------------------
-            if len(parts) == 2 and parts[0].lower() in ("get", "read"):
-      
-                parameter_text = parts[1].upper()
-      
-                if not parameter_text.startswith("PD"):
-                    raise ValueError("Use PD000..PD181")
-      
-                number_text = parameter_text[2:]
-      
-                if not number_text.isdigit():
-                    raise ValueError("Invalid parameter")
-      
-                parameter = int(number_text)
-      
-                if not 0 <= parameter <= 181:
-                    raise ValueError("Parameter must be PD000..PD181")
-      
-                with _LOCK:
-                    m = self.configure()
-      
-                    if not m.is_connected():
-                        self.connected = False
-                        raise RuntimeError("VFD is disconnected")
-      
-                    value = m.read_parameter(parameter)
-      
-                if value is None:
-                    raise RuntimeError(
-                        m.last_error() or "Read failed"
-                    )
-      
-                self.answer = f"PD{parameter:03d} = {value}"
-                self.console_line = f"VFD | GET | {self.answer}"
-                self.last_error = ""
-      
-                return True
-      
-            # --------------------------------------------------
-            # SET / WRITE
-            # set PD000 123
-            # write PD181 25
-            # --------------------------------------------------
-            if len(parts) == 3 and parts[0].lower() in ("set", "write"):
-      
-                parameter_text = parts[1].upper()
-      
-                if not parameter_text.startswith("PD"):
-                    raise ValueError("Use PD000..PD181")
-      
-                number_text = parameter_text[2:]
-      
-                if not number_text.isdigit():
-                    raise ValueError("Invalid parameter")
-      
-                parameter = int(number_text)
-                value = int(parts[2])
-      
-                if not 0 <= parameter <= 181:
-                    raise ValueError("Parameter must be PD000..PD181")
-      
-                if not 0 <= value <= 65535:
-                    raise ValueError("Value must be 0..65535")
-      
-                with _LOCK:
-                    m = self.configure()
-      
-                    if not m.is_connected():
-                        self.connected = False
-                        raise RuntimeError("VFD is disconnected")
-      
-                    ok = m.write_parameter(parameter, value)
-      
-                if not ok:
-                    raise RuntimeError(
-                        m.last_error() or "Write failed"
-                    )
-      
-                self.answer = f"PD{parameter:03d} = {value}"
-                self.console_line = f"VFD | SET | {self.answer}"
-                self.last_error = ""
-      
-                return True
-      
-            raise ValueError(
-                "Use: get PD000 or set PD000 123"
+            self.error_message = (
+                api.last_error()
             )
 
-    except Exception as e:
-        self.last_error = str(e)
-        self.answer = f"ERROR: {e}"
-        self.console_line = f"VFD | ERROR | {e}"
-        return False
-
-
-    def update_status(self):
-        if not self.connected:
-            self._outputs()
-            return
-        with _LOCK:
-            try:
-                m=self.get_manager()
-                status=m.update_status()
-                self.connected=bool(status.connected)
-                self.running=bool(status.running)
-                self.reverse=bool(status.reverse)
-                self.fault=bool(status.fault)
-                self.fault_code=int(status.fault_code)
-                self.actual_frequency=float(status.frequency_hz)
-                self.actual_rpm=float(status.rpm)
-                self.actual_current=float(status.current_a)
-                self.actual_voltage=float(status.voltage_v)
-                if self.fault:
-                    self.console_line=f"VFD | FAULT {self.fault_code} | {status.fault_text or 'VFD fault'}"
-                elif self.connected:
-                    state="RUN" if self.running else "READY"
-                    direction="REV" if self.reverse else "FWD"
-                    self.console_line=f"VFD | {state} | {direction} | {self.actual_frequency:.1f} Hz | {self.actual_rpm:.0f} RPM"
-                else:
-                    self.console_line="VFD | DISCONNECTED"
-            except Exception as e:
-                self.last_error=str(e)
-                self.console_line=f"VFD | ERROR | {e}"
-        self._outputs()
-    def _outputs(self):
-        values={"Frequency":self.actual_frequency,"RPM":self.actual_rpm,"Current":self.actual_current,"Voltage":self.actual_voltage,"Connected":self.connected,"Running":self.running,"Reverse":self.reverse,"Fault":self.fault}
-        for name,value in values.items():
-            s=self.outputs.get(name)
-            if s:
-                try:
-                    s.default_value=value
-                except Exception:
-                    pass
-    def update(self):
-        try:
-            if self.connected:
-                self.apply_command()
-            self._outputs()
-        except Exception:
-            pass
-
-    def draw_buttons(self,context,layout):
-        layout.label(text="VFD Node")
-      
-        # PD command
-        layout.label(text="Command:")        
-        row = layout.row(align=True)        
-        row.prop(self, "command", text="")        
-        op = row.operator("vfd.execute",text="EXEC",icon="PLAY")
-        op.node_name = self.name
-        
-        # PD answer
-        layout.label(text="Answer:")
-        
-        row = layout.row()
-        row.label(
-            text=self.answer if self.answer else "—",
-            icon="INFO"
-        )
-              
-        layout.separator()
-      
-        # Connection status
-        status_text = "CONNECTED" if self.connected else "DISCONNECTED"
-        layout.label(text=f"Status: {status_text}")
-
-        row = layout.row(align=True)
-        row.prop(self, "serial_port", text="Port")
-        row.prop(self, "slave_id", text="ID")
-      
-        row = layout.row(align=True)
-        row.prop(self, "baudrate", text="Baud")
-      
-        if self.connected:
-            op = row.operator("vfd.disconnect",text="Disconnect",icon="UNLINKED")
         else:
-            op = row.operator("vfd.connect",text="Connect",icon="LINKED")
-      
-        op.node_name = self.name
-      
-        row = layout.row(align=True)
-        row.prop(self, "enabled", text="Enabled", toggle=True)
-        row.prop(self, "armed", text="ARM", toggle=True)
-      
-        row = layout.row(align=True)
-        row.prop(self, "frequency_command", text="Hz")
-        row.prop(self, "rpm_command", text="RPM")
-      
-        row = layout.row(align=True)
-        row.prop(self, "running_command", text="RUN", toggle=True)
-        row.prop(self, "reverse_command", text="REV", toggle=True)
-      
-        op = row.operator("vfd.stop",text="STOP",icon="PAUSE")
-        op.node_name = self.name
-      
-        row = layout.row(align=True)
-        row.prop(self, "motor_frequency", text="Rated Hz")
-        row.prop(self, "motor_rpm", text="Rated RPM")
-      
-        row = layout.row(align=True)
-        row.prop(self,"minimum_frequency",text="Min")
-        row.prop(self,"maximum_frequency",text="Max")
-        # VFD response / console line
-        status=layout.row()
-        status.alert=self.fault
-        status.label(text=self.console_line,icon="ERROR" if self.fault else "INFO")
-    def draw_label(self):
-        return "VFD"
-def vfd_node_menu(self,context):
-    self.layout.operator("node.add_node",text="VFD",icon="DRIVER").type="VFDNode"
-def vfd_timer():
-    if not _TIMER_RUNNING:
-        return None
-    try:
-        for tree in bpy.data.node_groups:
-            if tree.bl_idname!="GeometryNodeTree":
+            self.error_message = ""
+
+        return self.connected
+
+    def disconnect_vfd(self) -> None:
+        api = self._get_api()
+
+        try:
+            api.stop()
+        except Exception:
+            pass
+
+        try:
+            api.disconnect()
+        except Exception:
+            pass
+
+        self.connected = False
+
+        self._clear_outputs()
+
+    # ------------------------------------------------------------------
+    # COMMAND CHANGES
+    # ------------------------------------------------------------------
+
+    def _command_changed(self) -> None:
+        """
+        Called when Blender properties change.
+
+        This does NOT directly access the serial port.
+
+        It only asks the API/manager to accept the desired state.
+        The communication layer decides when/how to transmit it.
+        """
+
+        if not self.connected:
+            return
+
+        self._submit_target()
+
+    def _submit_target(self) -> bool:
+        api = self._get_api()
+
+        frequency = float(
+            self.frequency_hz
+        )
+
+        running = bool(
+            self.run
+        )
+
+        reverse = bool(
+            self.reverse
+        )
+
+        # --------------------------------------------------------------
+        # Local deduplication.
+        #
+        # The manager also deduplicates, so this is only an additional
+        # protection against Blender repeatedly invoking the callback.
+        # --------------------------------------------------------------
+
+        command = (
+            frequency,
+            running,
+            reverse,
+            bool(self.enabled),
+            bool(self.armed),
+        )
+
+        if command == self._last_command:
+            return True
+
+        self._last_command = command
+
+        try:
+            api.set_enabled(
+                self.enabled
+            )
+
+            api.set_armed(
+                self.armed
+            )
+
+            result = api.set_target(
+                frequency_hz=frequency,
+                running=running,
+                reverse=reverse,
+            )
+
+        except Exception as exc:
+            self.error_message = str(exc)
+            return False
+
+        if not result:
+            self.error_message = (
+                api.last_error()
+            )
+            return False
+
+        self.error_message = ""
+
+        return True
+
+    # ------------------------------------------------------------------
+    # STATUS
+    # ------------------------------------------------------------------
+
+    def update_status(self) -> None:
+        """
+        Update Blender outputs from CACHED API state.
+
+        IMPORTANT:
+        Do not call refresh_status() here.
+
+        This function must remain cheap because Blender can call it
+        frequently.
+        """
+
+        api = self._get_api()
+
+        try:
+            status = api.get_status()
+
+        except Exception as exc:
+            self.error_message = str(exc)
+            return
+
+        self._apply_status(
+            status
+        )
+
+    def _apply_status(
+        self,
+        status: VFDStatus,
+    ) -> None:
+
+        self.connected = bool(
+            status.connected
+        )
+
+        self.actual_frequency_hz = float(
+            getattr(
+                status,
+                "frequency_hz",
+                0.0,
+            )
+        )
+
+        self.actual_rpm = float(
+            getattr(
+                status,
+                "rpm",
+                0.0,
+            )
+        )
+
+        self.actual_running = bool(
+            getattr(
+                status,
+                "running",
+                False,
+            )
+        )
+
+        self.actual_reverse = bool(
+            getattr(
+                status,
+                "reverse",
+                False,
+            )
+        )
+
+        self.fault = bool(
+            getattr(
+                status,
+                "fault",
+                False,
+            )
+        )
+
+        self.fault_code = int(
+            getattr(
+                status,
+                "fault_code",
+                0,
+            ) or 0
+        )
+
+        self.error_message = str(
+            getattr(
+                status,
+                "last_error",
+                "",
+            ) or ""
+        )
+
+        self._update_outputs()
+
+    # ------------------------------------------------------------------
+    # OUTPUTS
+    # ------------------------------------------------------------------
+
+    def _update_outputs(self) -> None:
+        if not self.outputs:
+            return
+
+        self._set_output(
+            "Frequency",
+            self.actual_frequency_hz,
+        )
+
+        self._set_output(
+            "RPM",
+            self.actual_rpm,
+        )
+
+        self._set_output(
+            "Running",
+            self.actual_running,
+        )
+
+        self._set_output(
+            "Reverse",
+            self.actual_reverse,
+        )
+
+        self._set_output(
+            "Fault",
+            self.fault,
+        )
+
+    def _set_output(
+        self,
+        name: str,
+        value,
+    ) -> None:
+        socket = self.outputs.get(name)
+
+        if socket is not None:
+            socket.default_value = value
+
+    def _clear_outputs(self) -> None:
+        self.actual_frequency_hz = 0.0
+        self.actual_rpm = 0.0
+        self.actual_running = False
+        self.actual_reverse = False
+        self.fault = False
+        self.fault_code = 0
+
+        self._update_outputs()
+
+    # ------------------------------------------------------------------
+    # NODE UPDATE
+    # ------------------------------------------------------------------
+
+    def update(self) -> None:
+        """
+        Blender node update callback.
+
+        CRITICAL RULE:
+        Never perform synchronous hardware I/O here.
+
+        The desired command is submitted through the API only when
+        Blender changes the node state.
+        """
+
+        self._update_outputs()
+
+    # ------------------------------------------------------------------
+    # OPTIONAL EXPLICIT REFRESH
+    # ------------------------------------------------------------------
+
+    def refresh_from_vfd(self) -> bool:
+        """
+        Explicit hardware refresh.
+
+        This should normally be called by the communication worker,
+        not by Blender's node evaluation.
+
+        Kept here only for manual/debug use.
+        """
+
+        if not self.connected:
+            return False
+
+        api = self._get_api()
+
+        try:
+            status = api.refresh_status()
+
+        except Exception as exc:
+            self.error_message = str(exc)
+            return False
+
+        if status is None:
+            return False
+
+        self._apply_status(status)
+
+        return True
+
+
+# ----------------------------------------------------------------------
+# BLENDER UI
+# ----------------------------------------------------------------------
+
+class VFDNodePropertiesPanel:
+    """
+    Optional helper for drawing node properties.
+
+    Keep UI code separate from communication logic.
+    """
+
+    @staticmethod
+    def draw(
+        node: VFDNode,
+        layout,
+    ):
+        layout.prop(
+            node,
+            "port",
+        )
+
+        layout.prop(
+            node,
+            "slave_id",
+        )
+
+        layout.separator()
+
+        layout.prop(
+            node,
+            "enabled",
+        )
+
+        layout.prop(
+            node,
+            "armed",
+        )
+
+        layout.separator()
+
+        layout.prop(
+            node,
+            "frequency_hz",
+        )
+
+        layout.prop(
+            node,
+            "run",
+        )
+
+        layout.prop(
+            node,
+            "reverse",
+        )
+
+        layout.separator()
+
+        row = layout.row()
+
+        if node.connected:
+            row.operator(
+                "vfd.disconnect",
+                text="Disconnect",
+            )
+        else:
+            row.operator(
+                "vfd.connect",
+                text="Connect",
+            )
+
+        if node.error_message:
+            box = layout.box()
+            box.label(
+                text=node.error_message,
+                icon="ERROR",
+            )
+
+
+# ----------------------------------------------------------------------
+# OPERATORS
+# ----------------------------------------------------------------------
+
+class VFD_OT_Connect(bpy.types.Operator):
+    bl_idname = "vfd.connect"
+    bl_label = "Connect VFD"
+
+    def execute(self, context):
+        node = context.active_node
+
+        if not isinstance(node, VFDNode):
+            return {"CANCELLED"}
+
+        if node.connect_vfd():
+            return {"FINISHED"}
+
+        return {"CANCELLED"}
+
+
+class VFD_OT_Disconnect(bpy.types.Operator):
+    bl_idname = "vfd.disconnect"
+    bl_label = "Disconnect VFD"
+
+    def execute(self, context):
+        node = context.active_node
+
+        if not isinstance(node, VFDNode):
+            return {"CANCELLED"}
+
+        node.disconnect_vfd()
+
+        return {"FINISHED"}
+
+
+# ----------------------------------------------------------------------
+# STATUS TIMER
+# ----------------------------------------------------------------------
+
+_STATUS_TIMER_RUNNING = False
+
+
+def vfd_status_timer():
+    """
+    Blender-side status refresh.
+
+    IMPORTANT:
+        This function must ONLY read cached status.
+
+    The communication worker is responsible for talking to the VFD.
+    """
+
+    for tree in bpy.data.node_groups:
+        if not hasattr(tree, "nodes"):
+            continue
+
+        for node in tree.nodes:
+            if not isinstance(node, VFDNode):
                 continue
-            for node in tree.nodes:
-                if isinstance(node,VFDNode):
-                    node.update_status()
-    except Exception as e:
-        print(f"[VFD] Timer error: {e}")
+
+            try:
+                node.update_status()
+            except Exception:
+                # Never allow one broken node to kill the timer.
+                continue
+
     return 0.1
-classes=(
-    VFD_OT_connect,
-    VFD_OT_disconnect,
-    VFD_OT_stop,
-    VFD_OT_reset,
-    VFD_OT_execute,
+
+
+def register_status_timer():
+    global _STATUS_TIMER_RUNNING
+
+    if _STATUS_TIMER_RUNNING:
+        return
+
+    if not bpy.app.timers.is_registered(
+        vfd_status_timer
+    ):
+        bpy.app.timers.register(
+            vfd_status_timer,
+            first_interval=0.1,
+            persistent=True,
+        )
+
+    _STATUS_TIMER_RUNNING = True
+
+
+def unregister_status_timer():
+    global _STATUS_TIMER_RUNNING
+
+    try:
+        if bpy.app.timers.is_registered(
+            vfd_status_timer
+        ):
+            bpy.app.timers.unregister(
+                vfd_status_timer
+            )
+    except Exception:
+        pass
+
+    _STATUS_TIMER_RUNNING = False
+
+
+# ----------------------------------------------------------------------
+# REGISTER
+# ----------------------------------------------------------------------
+
+CLASSES = (
     VFDNode,
+    VFD_OT_Connect,
+    VFD_OT_Disconnect,
 )
+
+
 def register():
-    global _TIMER_RUNNING
-    for cls in classes:
+    for cls in CLASSES:
         bpy.utils.register_class(cls)
-    menu=getattr(bpy.types,"NODE_MT_geometry_node_add_all",None)
-    if menu:
-        try:
-            menu.remove(vfd_node_menu)
-        except Exception:
-            pass
-        menu.append(vfd_node_menu)
-    _TIMER_RUNNING=True
-    if not bpy.app.timers.is_registered(vfd_timer):
-        bpy.app.timers.register(vfd_timer,first_interval=0.2,persistent=True)
+
+    register_status_timer()
+
+
 def unregister():
-    global _TIMER_RUNNING
-    _TIMER_RUNNING=False
-    try:
-        if bpy.app.timers.is_registered(vfd_timer):
-            bpy.app.timers.unregister(vfd_timer)
-    except Exception:
-        pass
-    try:
-        bpy.types.NODE_MT_geometry_node_add_all.remove(vfd_node_menu)
-    except Exception:
-        pass
-    for manager in list(_MANAGERS.values()):
+    unregister_status_timer()
+
+    # Disconnect all shared API sessions.
+    for api in list(_APIS.values()):
         try:
-            manager.stop()
+            api.disconnect()
         except Exception:
             pass
-        try:
-            manager.disconnect()
-        except Exception:
-            pass
-    _MANAGERS.clear()
-    for cls in reversed(classes):
-        try:
-            bpy.utils.unregister_class(cls)
-        except Exception:
-            pass
-if __name__=="__main__":
-    register()
+
+    _APIS.clear()
+
+    for cls in reversed(CLASSES):
+        bpy.utils.unregister_class(cls)
