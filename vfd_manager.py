@@ -128,83 +128,29 @@ class VFDManager:
     # CONNECTION
     # ------------------------------------------------------------------
 
-    def connect(self):
-        self.disconnect()
+    
+def connect(self):
+    result = self.session.connect()
 
-        if serial is None:
-            self._error(
-                "pyserial is not installed. "
-                "Install it with: pip install pyserial"
-            )
-            return False
+    if not result:
+        self._error(
+            self.session.last_error
+        )
+        return False
 
-        try:
-            self.transport = serial.Serial(
-                port=self.serial_port,
-                baudrate=self.baudrate,
-                bytesize=serial.EIGHTBITS,
-                parity=serial.PARITY_NONE,
-                stopbits=serial.STOPBITS_ONE,
-                timeout=self.timeout,
-                write_timeout=self.timeout,
-            )
+    self.status = VFDStatus(
+        connected=True,
+        state=VFDState.READY,
+    )
 
-            self.vfd = HY01D523B(
-                serial_port=self.transport,
-                slave_id=self.slave_id,
-                baudrate=self.baudrate,
-                timeout=self.timeout,
-            )
-
-            if not self.vfd.connect():
-                error = self.last_error() or "VFD connection failed."
-                self._error(error)
-                self.disconnect()
-                return False
-
-            self.status = VFDStatus(
-                connected=True,
-                state=VFDState.READY,
-            )
-
-            self.status.fault = False
-            self.status.fault_text = ""
-
-            return True
-
-        except Exception as exc:
-            self.vfd = None
-
-            try:
-                if self.transport is not None:
-                    self.transport.close()
-            except Exception:
-                pass
-
-            self.transport = None
-            self._error(f"Serial connection failed: {exc}")
-
-            return False
+    return True
 
     def disconnect(self):
-        if self.vfd is not None:
-            try:
-                self.vfd.disconnect()
-            except Exception:
-                pass
+    self.session.disconnect()
 
-        elif self.transport is not None:
-            try:
-                self.transport.close()
-            except Exception:
-                pass
-
-        self.vfd = None
-        self.transport = None
-
-        self.status.connected = False
-        self.status.running = False
-        self.status.state = VFDState.DISCONNECTED
+    self.status.connected = False
+    self.status.running = False
+    self.status.state = VFDState.DISCONNECTED
 
     def is_connected(self):
         if self.vfd is None:
