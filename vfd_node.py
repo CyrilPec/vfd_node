@@ -118,6 +118,8 @@ class VFDNode(Node):
     actual_current:FloatProperty(name="Current",default=0)
     actual_voltage:FloatProperty(name="Voltage",default=0)
     console_line:StringProperty(name="Console",default="VFD | DISCONNECTED")
+    command:StringProperty(name="Command",default="")
+    answer:StringProperty(name="Answer",default="")
     last_error:StringProperty(name="Error",default="")
     @classmethod
     def poll(cls,ntree):
@@ -326,7 +328,7 @@ class VFDNode(Node):
         layout.separator()
       
         # Connection status
-        layout.label(text=f"Status: {self.status}")
+        layout.label(text=f"Status: {status_text = "CONNECTED" if self.connected else "DISCONNECTED"}")
       
         row = layout.row(align=True)
         row.prop(self, "serial_port", text="Port")
@@ -336,17 +338,9 @@ class VFDNode(Node):
         row.prop(self, "baudrate", text="Baud")
       
         if self.connected:
-            op = row.operator(
-                "vfd.disconnect",
-                text="Disconnect",
-                icon="UNLINKED"
-            )
+            op = row.operator("vfd.disconnect",text="Disconnect",icon="UNLINKED")
         else:
-            op = row.operator(
-                "vfd.connect",
-                text="Connect",
-                icon="LINKED"
-            )
+            op = row.operator("vfd.connect",text="Connect",icon="LINKED")
       
         op.node_name = self.name
       
@@ -362,11 +356,7 @@ class VFDNode(Node):
         row.prop(self, "running_command", text="RUN", toggle=True)
         row.prop(self, "reverse_command", text="REV", toggle=True)
       
-        op = row.operator(
-            "vfd.stop",
-            text="STOP",
-            icon="PAUSE"
-        )
+        op = row.operator("vfd.stop",text="STOP",icon="PAUSE")
         op.node_name = self.name
       
         row = layout.row(align=True)
