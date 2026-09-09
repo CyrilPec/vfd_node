@@ -18,6 +18,11 @@ def register():
 def unregister():
     vfd_node.unregister()
 
+def __init__(self, *args, **kwargs):
+    super().__init__(*args, **kwargs)
+
+    self._last_command = None
+    self._last_api_key = None
 
 if __name__ == "__main__":
     register()
