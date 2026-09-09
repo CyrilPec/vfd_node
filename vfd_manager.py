@@ -58,16 +58,12 @@ class VFDManager:
         - status presentation
     """
 
+    from .vfd_session import VFDSession
+
     def __init__(self, motor=None):
         self.motor = motor
 
-        self.vfd: Optional[HY01D523B] = None
-        self.transport = None
-
-        self.serial_port = "COM3"
-        self.slave_id = 4
-        self.baudrate = 9600
-        self.timeout = 0.25
+        self.session = VFDSession()
 
         self.enabled = True
         self.armed = False
