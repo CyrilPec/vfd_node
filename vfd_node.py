@@ -52,20 +52,15 @@ class _VFDEntry:
         self.api = api
         self.users = 0
 
-def acquire_vfd_api(
-    port=self.port,
-    slave_id=self.slave_id,
-) -> VFDAPI:
-
+def acquire_vfd_api(self) -> VFDAPI:
     key = _api_key(
-        port,
-        slave_id,
+        self.port,
+        self.slave_id,
     )
 
     entry = _VFD_REGISTRY.get(key)
 
     if entry is None:
-
         session = VFDSession(
             port=key[0],
             slave_id=key[1],
